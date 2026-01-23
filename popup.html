@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        body {
+            width: 250px;
+            padding: 15px;
+            font-family: sans-serif;
+        }
+
+        input {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        button {
+            background: #2eaadc;
+            color: white;
+            border: none;
+            padding: 10px;
+            width: 100%;
+            cursor: pointer;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        button:hover {
+            background: #2589b1;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        #settings-area {
+            border-top: 1px solid #eee;
+            margin-top: 10px;
+            padding-top: 10px;
+        }
+
+        label {
+            font-size: 10px;
+            color: #666;
+            font-weight: bold;
+            display: block;
+            margin-bottom: 3px;
+        }
+
+        #status {
+            margin-top: 10px;
+            font-size: 12px;
+            text-align: center;
+        }
+
+        .icon-btn {
+            background: none;
+            color: #999;
+            font-size: 10px;
+            padding: 5px;
+            text-decoration: underline;
+            width: auto;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="main-view">
+        <button id="syncBtn">Sync Tasks</button>
+        <div id="status">Ready</div>
+        <button id="toggleSettings" class="icon-btn">Configure Keys</button>
+    </div>
+
+    <div id="settings-view" class="hidden">
+        <h3>Configuration</h3>
+        <label>NOTION TOKEN</label>
+        <input type="password" id="apiKey" placeholder="secret_...">
+
+        <label>DATABASE ID</label>
+        <input type="text" id="dbId" placeholder="32 char ID">
+
+        <button id="saveBtn">Save & Close</button>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>
