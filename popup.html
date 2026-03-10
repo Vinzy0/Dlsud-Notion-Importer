@@ -5,103 +5,112 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DLSUD to Notion</title>
-    <style>
-        body {
-            width: 250px;
-            padding: 15px;
-            font-family: sans-serif;
-        }
-
-        input {
-            width: 100%;
-            padding: 8px;
-            margin-bottom: 10px;
-            box-sizing: border-box;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-        }
-
-        button {
-            background: #2eaadc;
-            color: white;
-            border: none;
-            padding: 10px;
-            width: 100%;
-            cursor: pointer;
-            border-radius: 4px;
-            font-weight: bold;
-            transition: background 0.2s ease;
-        }
-
-        button:hover:not(:disabled) {
-            background: #2589b1;
-        }
-
-        button:disabled {
-            background: #999;
-            cursor: not-allowed;
-        }
-
-        .hidden {
-            display: none;
-        }
-
-        #settings-area {
-            border-top: 1px solid #eee;
-            margin-top: 10px;
-            padding-top: 10px;
-        }
-
-        label {
-            font-size: 10px;
-            color: #666;
-            font-weight: bold;
-            display: block;
-            margin-bottom: 3px;
-        }
-
-        #status {
-            margin-top: 10px;
-            font-size: 12px;
-            text-align: center;
-            word-wrap: break-word;
-        }
-
-        .icon-btn {
-            background: none;
-            color: #999;
-            font-size: 10px;
-            padding: 5px;
-            text-decoration: underline;
-            width: auto;
-            margin-top: 5px;
-        }
-
-        .icon-btn:hover:not(:disabled) {
-            background: none;
-            color: #666;
-        }
-    </style>
+    <link rel="stylesheet" href="styles.css">
 </head>
 
 <body>
-    <div id="main-view">
-        <button id="syncBtn">Sync Tasks</button>
-        <div id="status">Ready</div>
-        <button id="toggleSettings" class="icon-btn">Configure Keys</button>
+    <!-- Fixed Header -->
+    <header class="header">
+        <div class="header-title">DLSU-D</div>
+        <div class="header-actions">
+            <button id="refreshBtn" class="primary-btn header-btn" title="Refresh local tasks from DLSU-D">Fetch
+                Tasks</button>
+            <button id="settingsBtn" class="icon-btn" aria-label="Open Settings" title="Settings">⚙</button>
+        </div>
+    </header>
+
+    <!-- Tab Bar -->
+    <nav class="tab-bar">
+        <button class="tab active" data-tab="tasks">Tasks</button>
+        <button class="tab" data-tab="due-soon">Due Soon<span class="badge hidden" id="due-badge"></span></button>
+        <button class="tab" data-tab="files">Files</button>
+        <div class="tab-indicator" id="tab-indicator"></div>
+    </nav>
+
+    <!-- Main Content Area -->
+    <main class="content-area" id="main-content">
+        <!-- Empty / Status State -->
+        <div id="status-message" class="empty-state">
+            <p id="status-text">No tasks loaded.</p>
+            <button id="fetchInitialBtn" class="primary-btn">Fetch Tasks</button>
+            <button id="fetchFilesInitialBtn" class="primary-btn hidden">Fetch Files (This Page)</button>
+        </div>
+
+        <!-- Lists (hidden initially) -->
+        <div id="tasks-list" class="list-container hidden"></div>
+        <div id="due-soon-list" class="list-container hidden"></div>
+        <div id="files-list" class="list-container hidden"></div>
+    </main>
+
+    <!-- Action Bar (sliding from bottom) -->
+    <div id="action-bar" class="action-bar hidden">
+        <div class="action-left">
+            <select id="exportSelect" class="export-dropdown">
+                <option value="notion">Send to Notion</option>
+                <option value="text">Copy as Plain Text</option>
+                <option value="markdown">Copy as Markdown</option>
+                <option value="csv">Copy as CSV</option>
+            </select>
+            <button id="exportBtn" class="primary-btn small">Export</button>
+        </div>
+        <div class="action-right">
+            <span id="selected-count" class="selected-text">0 selected</span>
+            <button id="closeActionsBtn" class="icon-btn">✕</button>
+        </div>
     </div>
 
-    <div id="settings-view" class="hidden">
-        <h3>Configuration</h3>
-        <label for="apiKey">NOTION TOKEN</label>
-        <input type="password" id="apiKey" placeholder="secret_..." aria-label="Notion API Token">
+    <!-- Settings Panel (sliding from right) -->
+    <aside id="settings-panel" class="settings-panel">
+        <div class="settings-header">
+            <h3>Settings</h3>
+            <button id="closeSettingsBtn" class="icon-btn">✕</button>
+        </div>
+        <div class="settings-body">
+            <div class="form-group">
+                <label for="apiKey">NOTION TOKEN</label>
+                <input type="password" id="apiKey" placeholder="secret_..." aria-label="Notion API Token">
+            </div>
+            <div class="form-group">
+                <label for="dbId">DATABASE ID</label>
+                <input type="text" id="dbId" placeholder="32 char ID" aria-label="Notion Database ID">
+            </div>
+            <button id="saveKeysBtn" class="primary-btn">Save</button>
+            <div id="settings-status" class="status-msg"></div>
 
-        <label for="dbId">DATABASE ID</label>
-        <input type="text" id="dbId" placeholder="32 char ID" aria-label="Notion Database ID">
+            <hr class="divider">
 
-        <button id="saveBtn">Save &amp; Close</button>
+            <div class="form-group row">
+                <label for="autoRetrieve">Auto-Retrieve (Beta)</label>
+                <label class="switch">
+                    <input type="checkbox" id="autoRetrieve">
+                    <span class="slider round"></span>
+                </label>
+            </div>
+
+            <hr class="divider">
+
+            <button id="clearDataBtn" class="danger-btn">Clear All Data</button>
+        </div>
+    </aside>
+
+    <!-- Module Selector Modal -->
+    <div id="moduleSelectorModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Select Lessons</h3>
+                <label class="select-all-label"><input type="checkbox" id="selectAllModules" checked> Select All</label>
+            </div>
+            <div id="moduleList" class="module-list"></div>
+            <div class="action-bar modal-actions"
+                style="position:relative; transform:none; border-top: 1px solid var(--border-color); padding: 12px 16px; justify-content: flex-end; gap: 8px;">
+                <button id="cancelModuleBtn" class="secondary-btn small"
+                    style="background:#f0f0f0; color:#333;">Cancel</button>
+                <button id="scanModulesBtn" class="primary-btn small">Scan Selected</button>
+            </div>
+        </div>
     </div>
 
+    <script src="scraper.js"></script>
     <script src="popup.js"></script>
 </body>
 
