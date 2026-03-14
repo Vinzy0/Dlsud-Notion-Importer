@@ -2,20 +2,17 @@
  * Listens for messages from the popup to send tasks to Notion.
  * @param {Object} request - The message request object
  * @param {string} request.action - The action type ('sendToNotion')
- * @param {Array} request.data - Array of task objects to upload
- * @param {Object} request.auth - Authentication credentials
- * @param {string} request.auth.token - Notion API bearer token
- * @param {string} request.auth.dbId - Target Notion database ID
+ * @param {Array} request.tasks - Array of task objects to upload
+ * @param {string} request.token - Notion API bearer token
+ * @param {string} request.dbId - Target Notion database ID
  * @param {Object} sender - Message sender information
  * @param {Function} sendResponse - Callback to send response back
  * @returns {boolean} True to indicate async response
  */
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "sendToNotion") {
-        const { token, dbId } = request.auth;
-
-        pushToNotion(request.data, token, dbId).then(msg => {
-            sendResponse({ status: msg });
+        pushToNotion(request.tasks, request.token, request.dbId).then(result => {
+            sendResponse(result);
         });
         return true;
     }
@@ -25,11 +22,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  * Pushes an array of task objects to a Notion database.
  * Creates a new page in Notion for each task with Name, Subject, Due Date, and Link.
  * Implements rate limiting to stay within Notion API limits (~3 requests/second).
- * 
+ *
  * @param {Array<{name: string, subject: string, date: string, link: string}>} tasks - Tasks to upload
  * @param {string} token - Notion API bearer token (starts with 'secret_' or 'ntn_')
  * @param {string} dbId - Target Notion database ID (32 hex characters)
- * @returns {Promise<string>} Status message indicating success or failure
+ * @returns {Promise<{success: boolean, message: string}>} Result object
  */
 async function pushToNotion(tasks, token, dbId) {
     try {
@@ -72,14 +69,14 @@ async function pushToNotion(tasks, token, dbId) {
         }
 
         if (failCount === 0) {
-            return `Done! ${successCount} tasks added to Notion.`;
+            return { success: true, message: `${successCount} tasks added to Notion.` };
         } else if (successCount === 0) {
-            return "Error: All tasks failed. Check Console for details.";
+            return { success: false, message: "All tasks failed. Check Console for details." };
         } else {
-            return `Partial: ${successCount} added, ${failCount} failed.`;
+            return { success: true, message: `${successCount} added, ${failCount} failed.` };
         }
     } catch (error) {
         console.error("Notion API Error:", error);
-        return "Network Error: Unable to connect to Notion. Check your connection.";
+        return { success: false, message: "Network Error: Unable to connect to Notion." };
     }
 }

@@ -4,18 +4,52 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DLSUD to Notion</title>
+    <title>UDScraper</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 
 <body>
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+
     <!-- Fixed Header -->
     <header class="header">
-        <div class="header-title">DLSU-D</div>
+        <div class="header-brand">
+            <svg class="brand-icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <rect x="2" y="3" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M6 7h8M6 10h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <circle cx="15" cy="14" r="4" fill="url(#brandGrad)" stroke="none"/>
+                <path d="M13.5 14l1 1 2-2" stroke="white" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+                <defs>
+                    <linearGradient id="brandGrad" x1="11" y1="10" x2="19" y2="18">
+                        <stop stop-color="#6366f1"/>
+                        <stop offset="1" stop-color="#8b5cf6"/>
+                    </linearGradient>
+                </defs>
+            </svg>
+            <span class="brand-text">UD<span class="brand-accent">Scraper</span></span>
+        </div>
         <div class="header-actions">
-            <button id="refreshBtn" class="primary-btn header-btn" title="Refresh local tasks from DLSU-D">Fetch
-                Tasks</button>
-            <button id="settingsBtn" class="icon-btn" aria-label="Open Settings" title="Settings">⚙</button>
+            <button id="refreshBtn" class="header-btn" title="Refresh local tasks">
+                <svg class="btn-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1 1v5h5"/>
+                    <path d="M3.51 10a6 6 0 1 0 .49-5L1 6"/>
+                </svg>
+                <span class="btn-text">Fetch Tasks</span>
+            </button>
+            <button id="settingsBtn" class="icon-btn" aria-label="Open Settings" title="Settings">
+                <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                    <circle cx="8" cy="3" r="1"/>
+                    <circle cx="8" cy="8" r="1"/>
+                    <circle cx="8" cy="13" r="1"/>
+                    <line x1="1" y1="3" x2="6" y2="3"/>
+                    <line x1="10" y1="3" x2="15" y2="3"/>
+                    <line x1="1" y1="8" x2="6" y2="8"/>
+                    <line x1="10" y1="8" x2="15" y2="8"/>
+                    <line x1="1" y1="13" x2="6" y2="13"/>
+                    <line x1="10" y1="13" x2="15" y2="13"/>
+                </svg>
+            </button>
         </div>
     </header>
 
@@ -31,9 +65,37 @@
     <main class="content-area" id="main-content">
         <!-- Empty / Status State -->
         <div id="status-message" class="empty-state">
-            <p id="status-text">No tasks loaded.</p>
-            <button id="fetchInitialBtn" class="primary-btn">Fetch Tasks</button>
-            <button id="fetchFilesInitialBtn" class="primary-btn hidden">Fetch Files (This Page)</button>
+            <div class="empty-illustration">
+                <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+                    <rect x="14" y="8" width="36" height="48" rx="4" stroke="#5a5f73" stroke-width="2" fill="none"/>
+                    <rect x="22" y="4" width="20" height="8" rx="4" fill="#1c1f2e" stroke="#5a5f73" stroke-width="2"/>
+                    <path d="M22 26h20M22 34h14M22 42h18" stroke="#2a2f45" stroke-width="2" stroke-linecap="round"/>
+                    <circle cx="44" cy="44" r="12" fill="url(#emptyGrad)"/>
+                    <path d="M40 44h8M44 40v8" stroke="white" stroke-width="2" stroke-linecap="round"/>
+                    <defs>
+                        <linearGradient id="emptyGrad" x1="32" y1="32" x2="56" y2="56">
+                            <stop stop-color="#6366f1"/>
+                            <stop offset="1" stop-color="#8b5cf6"/>
+                        </linearGradient>
+                    </defs>
+                </svg>
+            </div>
+            <p class="empty-title" id="empty-title">No tasks yet</p>
+            <p class="empty-desc" id="status-text">Open your dashboard and fetch your assignments</p>
+            <button id="fetchInitialBtn" class="primary-btn">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1 1v5h5"/>
+                    <path d="M3.51 10a6 6 0 1 0 .49-5L1 6"/>
+                </svg>
+                Fetch Tasks
+            </button>
+            <button id="fetchFilesInitialBtn" class="primary-btn hidden">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M8 3v8m0 0l-3-3m3 3l3-3"/>
+                    <path d="M3 13h10"/>
+                </svg>
+                Fetch Files
+            </button>
         </div>
 
         <!-- Lists (hidden initially) -->
@@ -42,8 +104,9 @@
         <div id="files-list" class="list-container hidden"></div>
     </main>
 
-    <!-- Action Bar (sliding from bottom) -->
-    <div id="action-bar" class="action-bar hidden">
+    <!-- Action Bar (slides up from bottom) -->
+    <div id="action-bar" class="action-bar">
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
         <div class="action-left">
             <select id="exportSelect" class="export-dropdown">
                 <option value="notion">Send to Notion</option>
@@ -55,15 +118,26 @@
         </div>
         <div class="action-right">
             <span id="selected-count" class="selected-text">0 selected</span>
-            <button id="closeActionsBtn" class="icon-btn">✕</button>
+            <button id="closeActionsBtn" class="icon-btn">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                    <path d="M4 4l8 8M12 4l-8 8"/>
+                </svg>
+            </button>
         </div>
     </div>
 
-    <!-- Settings Panel (sliding from right) -->
+    <!-- Settings Backdrop -->
+    <div id="settings-backdrop" class="settings-backdrop"></div>
+
+    <!-- Settings Panel (slides from right) -->
     <aside id="settings-panel" class="settings-panel">
         <div class="settings-header">
             <h3>Settings</h3>
-            <button id="closeSettingsBtn" class="icon-btn">✕</button>
+            <button id="closeSettingsBtn" class="icon-btn">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                    <path d="M4 4l8 8M12 4l-8 8"/>
+                </svg>
+            </button>
         </div>
         <div class="settings-body">
             <div class="form-group">
@@ -72,9 +146,9 @@
             </div>
             <div class="form-group">
                 <label for="dbId">DATABASE ID</label>
-                <input type="text" id="dbId" placeholder="32 char ID" aria-label="Notion Database ID">
+                <input type="text" id="dbId" placeholder="32 character ID" aria-label="Notion Database ID">
             </div>
-            <button id="saveKeysBtn" class="primary-btn">Save</button>
+            <button id="saveKeysBtn" class="primary-btn">Save Credentials</button>
             <div id="settings-status" class="status-msg"></div>
 
             <hr class="divider">
@@ -94,17 +168,16 @@
     </aside>
 
     <!-- Module Selector Modal -->
-    <div id="moduleSelectorModal" class="modal hidden">
+    <div id="moduleSelectorModal" class="modal">
+        <div class="modal-overlay"></div>
         <div class="modal-content">
             <div class="modal-header">
                 <h3>Select Lessons</h3>
                 <label class="select-all-label"><input type="checkbox" id="selectAllModules" checked> Select All</label>
             </div>
             <div id="moduleList" class="module-list"></div>
-            <div class="action-bar modal-actions"
-                style="position:relative; transform:none; border-top: 1px solid var(--border-color); padding: 12px 16px; justify-content: flex-end; gap: 8px;">
-                <button id="cancelModuleBtn" class="secondary-btn small"
-                    style="background:#f0f0f0; color:#333;">Cancel</button>
+            <div class="action-bar modal-actions">
+                <button id="cancelModuleBtn" class="secondary-btn small">Cancel</button>
                 <button id="scanModulesBtn" class="primary-btn small">Scan Selected</button>
             </div>
         </div>
