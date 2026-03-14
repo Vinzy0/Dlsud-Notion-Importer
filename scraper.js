@@ -3,6 +3,32 @@
 // ==========================================
 
 /**
+ * Simple deterministic string hash, returns a base-36 string.
+ * Safe to call in both popup and injected page contexts.
+ */
+function hashStr(s) {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+    return Math.abs(h).toString(36);
+}
+
+/**
+ * Scrapes the current subject name from the page header.
+ * Injected into the page via chrome.scripting.
+ * @returns {string}
+ */
+function scrapeSubjectName() {
+    let subject = "Current Subject";
+    const headerObj = document.querySelector('header');
+    if (headerObj && headerObj.textContent) {
+        const match = headerObj.textContent.match(/([A-Z0-9_\-]+\s+.*)/i);
+        if (match) subject = match[0].split('-')[0].trim();
+        else subject = headerObj.textContent.substring(0, 30).trim();
+    }
+    return subject;
+}
+
+/**
  * Scrapes subject links from the DLSUD dashboard To-Do widget.
  * This function is stringified and injected into the page via chrome.scripting.
  * @returns {Array<{subject: string, url: string}>}
@@ -48,7 +74,7 @@ function parseSubjectPage(doc, subject, subjectUrl) {
         let colCounter = 0;
 
         for (let th of headers) {
-            const headerText = th.innerText.trim();
+            const headerText = th.textContent.trim();
             if (headerText === "Due") {
                 dueIndex = colCounter;
                 break;
@@ -72,12 +98,12 @@ function parseSubjectPage(doc, subject, subjectUrl) {
 
             // If "Due" column is found via headers
             if (dueIndex > -1 && row.cells[dueIndex]) {
-                const rawDate = row.cells[dueIndex].innerText.trim();
+                const rawDate = row.cells[dueIndex].textContent.trim();
                 finalDate = (rawDate === "-") ? "No Due Date" : rawDate;
             }
             // Fallback Regex on column 2 (looks for "Jan 15" format)
             else if (row.cells.length > 2) {
-                const backupDate = row.cells[2].innerText.trim();
+                const backupDate = row.cells[2].textContent.trim();
                 if (/^[A-Z][a-z]{2}\s\d/.test(backupDate)) {
                     finalDate = backupDate;
                 }
@@ -86,20 +112,25 @@ function parseSubjectPage(doc, subject, subjectUrl) {
             // Cleanup any arbitrary whitespace
             finalDate = finalDate.replace(/\s+/g, " ").trim();
 
+            const taskName = anchor.textContent.trim();
+            const taskLink = BASE_URL + anchor.getAttribute("href");
             tasks.push({
+                id: hashStr(subject + taskName + taskLink),
                 subject: subject,
-                name: anchor.innerText.trim(),
+                name: taskName,
                 date: finalDate,
-                link: BASE_URL + anchor.getAttribute("href")
+                link: taskLink
             });
         });
     } else {
         // Fallback for Single Assignment Redirects
         const titleEl = doc.querySelector("#fixedSectionHeader h2");
         if (titleEl) {
+            const taskName = titleEl.textContent.trim();
             tasks.push({
+                id: hashStr(subject + taskName + subjectUrl),
                 subject: subject,
-                name: titleEl.innerText.trim(),
+                name: taskName,
                 date: "Check Link",
                 link: subjectUrl
             });

@@ -2,7 +2,9 @@ const State = {
     tasks: [],
     files: [],
     selectedIds: new Set(),
-    activeTab: 'tasks'
+    activeTab: 'tasks',
+    dismissedFileWarning: false,
+    currentTabUrl: ''
 };
 
 // --- Curated subject color palette for dark mode ---
@@ -48,6 +50,9 @@ const els = {
     emptyTitle: document.getElementById('empty-title'),
     fetchInitialBtn: document.getElementById('fetchInitialBtn'),
     fetchFilesInitialBtn: document.getElementById('fetchFilesInitialBtn'),
+    fileWarning: document.getElementById('fileWarning'),
+    dismissFileWarning: document.getElementById('dismissFileWarning'),
+    dismissFileWarningBtn: document.getElementById('dismissFileWarningBtn'),
     lists: {
         'tasks': document.getElementById('tasks-list'),
         'due-soon': document.getElementById('due-soon-list'),
@@ -95,6 +100,44 @@ function showToast(message, type = 'info', duration = 3000) {
 }
 
 // ============================================================
+// Page Detection
+// ============================================================
+
+function isOnSubjectPage(url) {
+    if (!url) return false;
+    if (url.includes('/student_lesson/show/')) return true;
+    if (url === 'https://dlsud.edu20.org/' || url === 'http://dlsud.edu20.org/') return false;
+    if (url.match(/^https?:\/\/dlsud\.edu20\.org\/home(\/|$)/i)) return false;
+    if (url.match(/^https?:\/\/dlsud\.edu20\.org\/home_news(\/|$)/i)) return false;
+    if (url.match(/^https?:\/\/dlsud\.edu20\.org\/?$/)) return false;
+    return true;
+}
+
+async function showFileWarningIfNeeded() {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    State.currentTabUrl = tab?.url || '';
+    
+    const isFilesTab = State.activeTab === 'files';
+    const isHomePage = !isOnSubjectPage(State.currentTabUrl);
+    const hasFiles = State.files.length > 0;
+    const showWarning = isFilesTab && isHomePage && !State.dismissedFileWarning && !hasFiles;
+    
+    if (showWarning) {
+        els.fileWarning.classList.remove('hidden');
+        els.fetchFilesInitialBtn.classList.add('hidden');
+        els.emptyTitle.textContent = "No files yet";
+        els.statusText.textContent = "Navigate to a subject page and fetch files";
+    } else {
+        els.fileWarning.classList.add('hidden');
+        if (hasFiles) {
+            els.fetchFilesInitialBtn.classList.add('hidden');
+        } else {
+            els.fetchFilesInitialBtn.classList.remove('hidden');
+        }
+    }
+}
+
+// ============================================================
 // Skeleton Loading
 // ============================================================
 
@@ -114,6 +157,14 @@ function renderSkeletons(container, count = 5) {
 // Utilities
 // ============================================================
 
+/** Escapes a string for safe insertion into HTML. */
+function esc(s) {
+    if (!s) return '';
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
 function parseDate(rawString) {
     if (!rawString || rawString === "No Due Date" || rawString === "Check Link") return null;
     const match = rawString.match(/^[A-Z][a-z]{2}\s\d+/);
@@ -121,6 +172,9 @@ function parseDate(rawString) {
     const currentYear = new Date().getFullYear();
     const d = new Date(`${match[0]} ${currentYear}`);
     if (isNaN(d.getTime())) return null;
+    // If the parsed date is more than ~6 months in the past, it's probably next year.
+    const now = new Date();
+    if (now - d > 180 * 24 * 60 * 60 * 1000) d.setFullYear(d.getFullYear() + 1);
     return d;
 }
 
@@ -204,17 +258,17 @@ function renderTasks() {
         const rowHTML = `
             <div class="task-row" ${urgencyAttr} style="animation-delay:${Math.min(index * 40, 200)}ms">
                 <label class="checkbox-wrapper">
-                    <input type="checkbox" class="task-checkbox" data-index="${index}" ${State.selectedIds.has(index) ? 'checked' : ''}>
+                    <input type="checkbox" class="task-checkbox" data-id="${task.id}" ${State.selectedIds.has(task.id) ? 'checked' : ''}>
                     <span class="checkbox-custom">${ICONS.check}</span>
                 </label>
                 <div class="task-info">
-                    <span class="task-name" title="${task.name}">${task.name}</span>
+                    <span class="task-name" title="${esc(task.name)}">${esc(task.name)}</span>
                     <div class="task-meta">
-                        <span class="subject-pill" style="background:${color.bg}; color:${color.text}; border:1px solid ${color.border}">${task.subject}</span>
+                        <span class="subject-pill" style="background:${color.bg}; color:${color.text}; border:1px solid ${color.border}">${esc(task.subject)}</span>
                         ${urgencyBadge}
                     </div>
                 </div>
-                <a href="${task.link}" target="_blank" class="task-link" title="Open Task">${ICONS.externalLink}</a>
+                <a href="${esc(task.link)}" target="_blank" class="task-link" title="Open Task">${ICONS.externalLink}</a>
             </div>
         `;
 
@@ -290,7 +344,7 @@ function renderFiles() {
         filesHTML += `
             <div class="subject-file-group">
                 <div class="subject-file-header">
-                    <span class="subject-pill" style="background:${color.bg}; color:${color.text}; border:1px solid ${color.border}">${subject}</span>
+                    <span class="subject-pill" style="background:${color.bg}; color:${color.text}; border:1px solid ${color.border}">${esc(subject)}</span>
                 </div>
         `;
 
@@ -298,15 +352,15 @@ function renderFiles() {
             const typeClass = getFileTypeClass(file.extension);
             filesHTML += `
                 <div class="file-row" style="animation-delay:${Math.min(fileIndex * 40, 200)}ms">
-                    <div class="file-type-icon ${typeClass}">${(file.extension || 'FILE').toUpperCase()}</div>
+                    <div class="file-type-icon ${typeClass}">${esc((file.extension || 'FILE').toUpperCase())}</div>
                     <div class="file-details">
-                        <span class="file-name" title="${file.filename}">${file.filename}</span>
+                        <span class="file-name" title="${esc(file.filename)}">${esc(file.filename)}</span>
                         <div class="file-meta-row">
-                            <span class="file-url">${file.url.replace(/^https?:\/\//, '').split('?')[0]}</span>
-                            <span class="file-task">from: ${file.taskName}</span>
+                            <span class="file-url">${esc(file.url.replace(/^https?:\/\//, '').split('?')[0])}</span>
+                            <span class="file-task">from: ${esc(file.taskName)}</span>
                         </div>
                     </div>
-                    <button class="download-btn download-single-btn" data-url="${file.url}" data-filename="${file.filename}" title="Download">
+                    <button class="download-btn download-single-btn" data-url="${esc(file.url)}" data-filename="${esc(file.filename)}" title="Download">
                         ${ICONS.download}
                     </button>
                 </div>
@@ -349,12 +403,12 @@ function renderFiles() {
 function attachCheckboxListeners() {
     document.querySelectorAll('.task-checkbox').forEach(cb => {
         cb.addEventListener('change', (e) => {
-            const idx = parseInt(e.target.dataset.index);
-            if (e.target.checked) State.selectedIds.add(idx);
-            else State.selectedIds.delete(idx);
+            const id = e.target.dataset.id;
+            if (e.target.checked) State.selectedIds.add(id);
+            else State.selectedIds.delete(id);
 
-            // Sync identical checkboxes across tabs
-            document.querySelectorAll(`.task-checkbox[data-index="${idx}"]`).forEach(box => {
+            // Sync identical checkboxes across tabs (tasks + due-soon share the same task)
+            document.querySelectorAll(`.task-checkbox[data-id="${id}"]`).forEach(box => {
                 box.checked = e.target.checked;
             });
 
@@ -397,9 +451,15 @@ function switchTab(tabId) {
         } else {
             els.fetchInitialBtn.classList.remove('hidden');
             els.fetchFilesInitialBtn.classList.add('hidden');
+            els.fileWarning.classList.add('hidden');
             els.emptyTitle.textContent = "No tasks yet";
             els.statusText.textContent = "Open your dashboard and fetch your assignments";
         }
+    }
+
+    // Check if we need to show file warning
+    if (tabId === 'files') {
+        showFileWarningIfNeeded();
     }
 
     // Update Header Button Text
@@ -491,7 +551,7 @@ els.closeActionsBtn.addEventListener('click', () => {
 
 els.exportBtn.addEventListener('click', async () => {
     const format = els.exportSelect.value;
-    const selectedTasks = [...State.selectedIds].map(i => State.tasks[i]).filter(Boolean);
+    const selectedTasks = [...State.selectedIds].map(id => State.tasks.find(t => t.id === id)).filter(Boolean);
 
     if (selectedTasks.length === 0) {
         showToast('No tasks selected', 'error');
@@ -554,8 +614,9 @@ els.exportBtn.addEventListener('click', async () => {
         showToast('Copied as Markdown', 'success');
 
     } else if (format === 'csv') {
+        const csvCell = s => `"${(s || '').replace(/"/g, '""')}"`;
         const header = 'Subject,Task,Due Date,Link';
-        const rows = selectedTasks.map(t => `"${t.subject}","${t.name}","${t.date || ''}","${t.link || ''}"`);
+        const rows = selectedTasks.map(t => [csvCell(t.subject), csvCell(t.name), csvCell(t.date), csvCell(t.link)].join(','));
         await navigator.clipboard.writeText([header, ...rows].join('\n'));
         showToast('Copied as CSV', 'success');
     }
@@ -571,6 +632,15 @@ els.refreshBtn.addEventListener('click', () => {
 });
 els.fetchInitialBtn.addEventListener('click', doFetch);
 els.fetchFilesInitialBtn.addEventListener('click', doFetchFilesOnly);
+
+els.dismissFileWarningBtn.addEventListener('click', () => {
+    if (els.dismissFileWarning.checked) {
+        State.dismissedFileWarning = true;
+        chrome.storage.local.set({ dismissedFileWarning: true });
+    }
+    els.fileWarning.classList.add('hidden');
+    els.fetchFilesInitialBtn.classList.remove('hidden');
+});
 
 async function doFetch() {
     els.statusMessage.classList.add('hidden');
@@ -627,31 +697,35 @@ async function doFetch() {
         const allTasks = [];
         const allFiles = [];
 
+        const parser = new DOMParser();
+
         for (const link of subjectLinks) {
             try {
                 const response = await fetch(link.url);
                 const text = await response.text();
-                const parser = new DOMParser();
                 const doc = parser.parseFromString(text, "text/html");
 
                 const tasks = parseSubjectPage(doc, link.subject, link.url);
                 allTasks.push(...tasks);
 
-                for (const task of tasks) {
-                    if (task.link && task.link !== link.url) {
-                        try {
-                            const taskResponse = await fetch(task.link);
-                            const taskText = await taskResponse.text();
-                            const taskDoc = parser.parseFromString(taskText, "text/html");
-                            const filesDesc = findFilesOnPage(taskDoc, task.subject, task.name, task.link);
-                            if (filesDesc && filesDesc.length > 0) {
-                                allFiles.push(...filesDesc);
-                            }
-                        } catch (e) {
-                            console.error(`Error finding files on task ${task.name}:`, e);
-                        }
-                    }
-                }
+                // Fetch all task pages in parallel instead of sequentially
+                const taskPageResults = await Promise.all(
+                    tasks
+                        .filter(task => task.link && task.link !== link.url)
+                        .map(task =>
+                            fetch(task.link)
+                                .then(r => r.text())
+                                .then(html => {
+                                    const taskDoc = parser.parseFromString(html, "text/html");
+                                    return findFilesOnPage(taskDoc, task.subject, task.name, task.link);
+                                })
+                                .catch(e => {
+                                    console.error(`Error finding files on task ${task.name}:`, e);
+                                    return [];
+                                })
+                        )
+                );
+                taskPageResults.forEach(files => allFiles.push(...files));
             } catch (err) {
                 console.error(`Error fetching ${link.subject}:`, err);
             }
@@ -703,48 +777,32 @@ async function doFetchFilesOnly() {
             els.lists['files'].classList.add('hidden');
             els.statusMessage.classList.remove('hidden');
             els.emptyTitle.textContent = "Wrong page";
-            els.statusText.textContent = "Please go to a subject page first.";
+            els.statusText.textContent = "File fetching only works on subject pages. Navigate to a subject's module page and try again.";
             return;
         }
 
+        if (!isOnSubjectPage(tab.url)) {
+            els.lists['files'].classList.add('hidden');
+            els.statusMessage.classList.remove('hidden');
+            els.fileWarning.classList.remove('hidden');
+            els.fetchFilesInitialBtn.classList.add('hidden');
+            els.emptyTitle.textContent = "No files yet";
+            els.statusText.textContent = "Navigate to a subject page and fetch files";
+            return;
+        }
+
+        // Inject scraper.js into the page so we can call its functions directly,
+        // eliminating the duplicated sidebar and file-scan logic.
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['scraper.js'] });
+
         const results = await chrome.scripting.executeScript({
             target: { tabId: tab.id },
-            func: () => {
-                let subject = "Current Subject";
-                const headerObj = document.querySelector('header');
-                if (headerObj && headerObj.textContent) {
-                    const match = headerObj.textContent.match(/([A-Z0-9_\-]+\s+.*)/i);
-                    if (match) subject = match[0].split('-')[0].trim();
-                    else subject = headerObj.textContent.substring(0, 30).trim();
-                }
-
-                let sidebarLinks = [];
-                const nav = document.querySelector('.section_nav_holder') || document.querySelector('#contentWrap nav');
-                if (nav) {
-                    const links = nav.querySelectorAll('a[href*="/student_lesson/"], a[href*="/lesson/"]');
-                    const seenUrls = new Set();
-                    const BASE_URL = "https://dlsud.edu20.org";
-                    links.forEach(link => {
-                        const href = link.getAttribute('href');
-                        if (!href || href === "#" || href.startsWith("javascript:")) return;
-                        const fullUrl = href.startsWith('http') ? href : BASE_URL + href;
-                        if (seenUrls.has(fullUrl)) return;
-                        seenUrls.add(fullUrl);
-
-                        let title = "";
-                        const titleSpans = link.querySelectorAll('.evo-module-title');
-                        if (titleSpans.length > 0) {
-                            title = titleSpans[titleSpans.length - 1].innerText.replace(/[\n\r]+/g, ' ').trim();
-                        } else {
-                            title = link.innerText.replace(/[\n\r]+/g, ' ').trim();
-                        }
-                        if (!title) title = "Unnamed Lesson";
-                        sidebarLinks.push({ title, url: fullUrl });
-                    });
-                }
-
-                return { subject, sidebarLinks, currentHref: location.href, currentTitle: document.title };
-            }
+            func: () => ({
+                subject: scrapeSubjectName(),
+                sidebarLinks: scrapeSidebarModules() || [],
+                currentHref: location.href,
+                currentTitle: document.title
+            })
         });
 
         if (!results || !results[0] || !results[0].result) throw new Error("Could not parse page context.");
@@ -758,7 +816,7 @@ async function doFetchFilesOnly() {
             els.moduleList.innerHTML = context.sidebarLinks.map((link, i) => `
                 <div class="module-item">
                     <input type="checkbox" id="mod-${i}" class="module-checkbox" value="${i}" checked>
-                    <label for="mod-${i}" title="${link.title}">${link.title}</label>
+                    <label for="mod-${i}" title="${esc(link.title)}">${esc(link.title)}</label>
                 </div>
             `).join('');
 
@@ -775,50 +833,13 @@ async function doFetchFilesOnly() {
             return;
         }
 
-        // Fallback: No Sidebar, direct single page scan
+        // Fallback: No Sidebar — scan the current page directly using the injected findFilesOnPage.
         showToast('No modules found. Scanning current page...', 'info', 2000);
 
         const fileResults = await chrome.scripting.executeScript({
             target: { tabId: tab.id },
-            func: () => {
-                const files = [];
-                const BASE_URL = "https://dlsud.edu20.org";
-                const allLinks = document.querySelectorAll("a[href]");
-                const fileExtensions = /\.(pdf|pptx?|docx?|xlsx?|zip|jpeg|jpg|png)$/i;
-                const seenUrls = new Set();
-
-                allLinks.forEach(link => {
-                    const href = link.getAttribute("href");
-                    if (!href) return;
-                    let fileUrl = ""; let isFile = false;
-                    if (href.includes("/files/") || href.includes("/download/") || fileExtensions.test(href.split('?')[0])) {
-                        isFile = true;
-                        fileUrl = href.startsWith('http') ? href : BASE_URL + href;
-                    }
-                    if (isFile && !seenUrls.has(fileUrl)) {
-                        seenUrls.add(fileUrl);
-                        let filename = link.textContent.trim().replace(/\(\d+\)/g, '').trim();
-                        if (!filename || filename.toLowerCase() === "download" || filename.toLowerCase() === "view") {
-                            try {
-                                const urlObj = new URL(fileUrl);
-                                const pathParts = urlObj.pathname.split('/');
-                                const lastPart = decodeURIComponent(pathParts[pathParts.length - 1]);
-                                if (lastPart && lastPart.includes('.')) filename = lastPart;
-                                else filename = "Attachment";
-                            } catch (e) { filename = "Attachment"; }
-                        }
-                        let ext = "file";
-                        const match = filename.match(/\.([a-z0-9]+)$/i);
-                        if (match) ext = match[1].toLowerCase();
-                        else {
-                            const urlMatch = fileUrl.split('?')[0].match(/\.([a-z0-9]+)$/i);
-                            if (urlMatch) ext = urlMatch[1].toLowerCase();
-                        }
-                        files.push({ filename: filename.replace(/\_+/g, ' '), url: fileUrl, extension: ext });
-                    }
-                });
-                return files;
-            }
+            func: (subj, taskName, sourceUrl) => findFilesOnPage(document, subj, taskName, sourceUrl),
+            args: [context.subject, context.currentTitle || "Current Page", context.currentHref]
         });
 
         if (!fileResults || !fileResults[0] || !fileResults[0].result || fileResults[0].result.length === 0) {
@@ -830,12 +851,7 @@ async function doFetchFilesOnly() {
             return;
         }
 
-        const newFiles = fileResults[0].result.map(f => ({
-            ...f,
-            subject: context.subject,
-            taskName: context.currentTitle || "Current Page",
-            sourcePageUrl: context.currentHref
-        }));
+        const newFiles = fileResults[0].result;
 
         State.files.push(...newFiles);
         saveAndRenderFiles();
@@ -863,13 +879,18 @@ function resetFileFetchButtons() {
 }
 
 function saveAndRenderFiles() {
-    const cache = {
-        timestamp: Date.now(),
-        tasks: State.tasks,
-        files: State.files
-    };
-    chrome.storage.local.set({ lastScrape: cache }, () => {
-        loadCache();
+    // Read existing cache first so we never overwrite tasks with an empty array
+    // when the user has only fetched files (not tasks) in this session.
+    chrome.storage.local.get(['lastScrape'], (items) => {
+        const existing = items.lastScrape || {};
+        const cache = {
+            timestamp: Date.now(),
+            tasks: State.tasks.length > 0 ? State.tasks : (existing.tasks || []),
+            files: State.files
+        };
+        chrome.storage.local.set({ lastScrape: cache }, () => {
+            loadCache();
+        });
     });
 }
 
@@ -911,7 +932,7 @@ els.scanModulesBtn.addEventListener('click', async () => {
     try {
         for (let i = 0; i < targetLinks.length; i++) {
             const link = targetLinks[i];
-            showToast(`Scanning ${i + 1}/${targetLinks.length}: ${link.title.substring(0, 25)}...`, 'info', 1500);
+            els.btnText.textContent = `${i + 1}/${targetLinks.length}`;
 
             try {
                 const response = await fetch(link.url);
@@ -956,13 +977,15 @@ els.scanModulesBtn.addEventListener('click', async () => {
 // ============================================================
 
 function loadCache() {
-    chrome.storage.local.get(['lastScrape', 'notionToken', 'notionDbId'], (items) => {
+    chrome.storage.local.get(['lastScrape', 'notionToken', 'notionDbId', 'dismissedFileWarning'], (items) => {
         if (items.notionToken) els.apiKey.value = items.notionToken;
         if (items.notionDbId) els.dbId.value = items.notionDbId;
+        State.dismissedFileWarning = items.dismissedFileWarning || false;
 
         const cache = items.lastScrape;
         if (cache && cache.tasks && cache.tasks.length > 0) {
-            State.tasks = cache.tasks;
+            // Backfill IDs for tasks cached before this field was added.
+            State.tasks = cache.tasks.map(t => t.id ? t : { ...t, id: hashStr(t.subject + t.name + t.link) });
             State.files = cache.files || [];
 
             els.statusMessage.classList.add('hidden');
@@ -988,6 +1011,7 @@ function loadCache() {
             els.statusMessage.classList.remove('hidden');
             els.emptyTitle.textContent = "No tasks yet";
             els.statusText.textContent = "Open your dashboard and fetch your assignments";
+            showFileWarningIfNeeded();
         } else {
             // First time or empty
             els.statusMessage.classList.remove('hidden');
@@ -999,6 +1023,9 @@ function loadCache() {
                 els.emptyTitle.textContent = "No tasks yet";
                 els.statusText.textContent = "Open your dashboard and fetch your assignments";
             }
+            
+            // Check if we're on files tab and need to show warning
+            showFileWarningIfNeeded();
         }
     });
 }
