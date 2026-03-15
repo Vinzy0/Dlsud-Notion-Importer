@@ -4,7 +4,8 @@ const State = {
     selectedIds: new Set(),
     activeTab: 'tasks',
     dismissedFileWarning: false,
-    currentTabUrl: ''
+    currentTabUrl: '',
+    darkMode: false
 };
 
 // --- Curated subject color palette for dark mode ---
@@ -35,8 +36,6 @@ const ICONS = {
 
 // UI Elements
 const els = {
-    refreshBtn: document.getElementById('refreshBtn'),
-    btnText: null, // set after DOM
     settingsBtn: document.getElementById('settingsBtn'),
     closeSettingsBtn: document.getElementById('closeSettingsBtn'),
     settingsPanel: document.getElementById('settings-panel'),
@@ -72,6 +71,7 @@ const els = {
     apiKey: document.getElementById('apiKey'),
     dbId: document.getElementById('dbId'),
     settingsStatus: document.getElementById('settings-status'),
+    darkMode: document.getElementById('darkMode'),
 
     // Modal
     moduleSelectorModal: document.getElementById('moduleSelectorModal'),
@@ -80,8 +80,6 @@ const els = {
     cancelModuleBtn: document.getElementById('cancelModuleBtn'),
     scanModulesBtn: document.getElementById('scanModulesBtn')
 };
-
-els.btnText = els.refreshBtn.querySelector('.btn-text');
 
 // ============================================================
 // Toast Notification System
@@ -220,9 +218,19 @@ function getFileTypeClass(ext) {
 // Rendering
 // ============================================================
 
+const REFRESH_ICON = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1v5h5"/><path d="M3.51 10a6 6 0 1 0 .49-5L1 6"/></svg>`;
+
 function renderTasks() {
-    els.lists['tasks'].innerHTML = '';
-    els.lists['due-soon'].innerHTML = '';
+    const taskCount = State.tasks.length;
+    const taskToolbar = `
+        <div class="list-top-header">
+            <span>${taskCount} task${taskCount !== 1 ? 's' : ''}</span>
+            <button class="secondary-btn small list-refresh-btn" id="refreshTasksBtn">${REFRESH_ICON} Refresh</button>
+        </div>
+        <hr class="files-divider">
+    `;
+    els.lists['tasks'].innerHTML = taskToolbar;
+    els.lists['due-soon'].innerHTML = taskToolbar.replace('id="refreshTasksBtn"', 'id="refreshDueSoonBtn"');
 
     const sortedTasks = [...State.tasks].sort((a, b) => {
         const da = parseDate(a.date);
@@ -318,6 +326,13 @@ function renderFiles() {
                 </div>
                 <p class="empty-title">No files yet</p>
                 <p class="empty-desc">Navigate to a subject page and fetch files</p>
+                <button class="primary-btn" id="fetchFilesEmptyBtn">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M8 3v8m0 0l-3-3m3 3l3-3"/>
+                        <path d="M3 13h10"/>
+                    </svg>
+                    Fetch Files
+                </button>
             </div>
         `;
         return;
@@ -332,7 +347,10 @@ function renderFiles() {
     let filesHTML = `
         <div class="files-top-header">
             <span>Files (${State.files.length})</span>
-            <button class="danger-btn small" id="clearFilesBtn">Clear</button>
+            <div class="files-header-actions">
+                <button class="secondary-btn small list-refresh-btn" id="refreshFilesBtn">${REFRESH_ICON} Fetch More</button>
+                <button class="danger-btn small" id="clearFilesBtn">Clear</button>
+            </div>
         </div>
         <hr class="files-divider">
     `;
@@ -390,8 +408,15 @@ function renderFiles() {
         btn.addEventListener('click', (e) => {
             let target = e.target.closest('button');
             if (!target) return;
-            chrome.downloads.download({ url: target.dataset.url, filename: target.dataset.filename });
-            showToast(`Downloading ${target.dataset.filename}`, 'info', 2000);
+            const rawName = target.dataset.filename || 'download';
+            const safeName = rawName.replace(/[\\/:*?"<>|]/g, '_').trim();
+            chrome.downloads.download({ url: target.dataset.url, filename: safeName }, (downloadId) => {
+                if (chrome.runtime.lastError) {
+                    showToast(`Download failed: ${chrome.runtime.lastError.message}`, 'error');
+                } else {
+                    showToast(`Downloading ${safeName}`, 'info', 2000);
+                }
+            });
         });
     });
 }
@@ -441,13 +466,22 @@ function switchTab(tabId) {
     els.lists[tabId].classList.remove('hidden');
     State.activeTab = tabId;
 
-    // Toggle Empty State Buttons
-    if (!els.statusMessage.classList.contains('hidden')) {
+    // Data-driven: always decide whether to show status-message based on
+    // whether the active tab actually has data. The old guard
+    // (!statusMessage.classList.contains('hidden')) was the bug —
+    // it left status-message visible when switching to a loaded files tab.
+    const hasData = tabId === 'files' ? State.files.length > 0 : State.tasks.length > 0;
+
+    if (hasData) {
+        els.statusMessage.classList.add('hidden');
+    } else {
+        els.statusMessage.classList.remove('hidden');
         if (tabId === 'files') {
             els.fetchInitialBtn.classList.add('hidden');
             els.fetchFilesInitialBtn.classList.remove('hidden');
             els.emptyTitle.textContent = "No files yet";
             els.statusText.textContent = "Navigate to a subject page and fetch files";
+            showFileWarningIfNeeded();
         } else {
             els.fetchInitialBtn.classList.remove('hidden');
             els.fetchFilesInitialBtn.classList.add('hidden');
@@ -455,18 +489,6 @@ function switchTab(tabId) {
             els.emptyTitle.textContent = "No tasks yet";
             els.statusText.textContent = "Open your dashboard and fetch your assignments";
         }
-    }
-
-    // Check if we need to show file warning
-    if (tabId === 'files') {
-        showFileWarningIfNeeded();
-    }
-
-    // Update Header Button Text
-    if (tabId === 'files') {
-        els.btnText.textContent = "Fetch Files";
-    } else {
-        els.btnText.textContent = "Fetch Tasks";
     }
 
     // Animate indicator - segmented control calculation
@@ -536,6 +558,11 @@ els.clearDataBtn.addEventListener('click', () => {
         closeSettings();
         showToast('All data cleared', 'info');
     });
+});
+
+// Dark Mode Toggle
+els.darkMode.addEventListener('change', (e) => {
+    toggleDarkMode(e.target.checked);
 });
 
 // Close Actions
@@ -626,12 +653,15 @@ els.exportBtn.addEventListener('click', async () => {
 // Fetch Logic
 // ============================================================
 
-els.refreshBtn.addEventListener('click', () => {
-    if (State.activeTab === 'files') doFetchFilesOnly();
-    else doFetch();
-});
 els.fetchInitialBtn.addEventListener('click', doFetch);
 els.fetchFilesInitialBtn.addEventListener('click', doFetchFilesOnly);
+
+// Delegate clicks on dynamically-rendered refresh buttons inside each list.
+els.lists['tasks'].addEventListener('click', e => { if (e.target.closest('#refreshTasksBtn')) doFetch(); });
+els.lists['due-soon'].addEventListener('click', e => { if (e.target.closest('#refreshDueSoonBtn')) doFetch(); });
+els.lists['files'].addEventListener('click', e => {
+    if (e.target.closest('#refreshFilesBtn') || e.target.closest('#fetchFilesEmptyBtn')) doFetchFilesOnly();
+});
 
 els.dismissFileWarningBtn.addEventListener('click', () => {
     if (els.dismissFileWarning.checked) {
@@ -646,9 +676,6 @@ async function doFetch() {
     els.statusMessage.classList.add('hidden');
     els.lists['tasks'].classList.remove('hidden');
     renderSkeletons(els.lists['tasks'], 5);
-
-    els.refreshBtn.classList.add('spinning');
-    els.btnText.textContent = "Fetching...";
 
     State.tasks = [];
     State.files = [];
@@ -731,7 +758,11 @@ async function doFetch() {
             }
         }
 
-        if (allTasks.length === 0) {
+        // Deduplicate by stable ID — the same task can appear under multiple subjects
+        // if the widget lists it more than once.
+        const uniqueTasks = [...new Map(allTasks.map(t => [t.id, t])).values()];
+
+        if (uniqueTasks.length === 0) {
             els.lists['tasks'].classList.add('hidden');
             els.statusMessage.classList.remove('hidden');
             els.emptyTitle.textContent = "All caught up";
@@ -740,13 +771,13 @@ async function doFetch() {
         } else {
             const cache = {
                 timestamp: Date.now(),
-                tasks: allTasks,
+                tasks: uniqueTasks,
                 files: allFiles
             };
             chrome.storage.local.set({ lastScrape: cache }, () => {
                 loadCache();
             });
-            showToast(`Found ${allTasks.length} tasks${allFiles.length > 0 ? ` and ${allFiles.length} files` : ''}`, 'success');
+            showToast(`Found ${uniqueTasks.length} tasks${allFiles.length > 0 ? ` and ${allFiles.length} files` : ''}`, 'success');
         }
     } catch (err) {
         console.error("Scrape Error:", err);
@@ -756,9 +787,6 @@ async function doFetch() {
         els.statusText.textContent = "Error scanning. Check your connection.";
         els.fetchInitialBtn.classList.remove('hidden');
         showToast('Scan failed', 'error');
-    } finally {
-        els.refreshBtn.classList.remove('spinning');
-        els.btnText.textContent = "Fetch Tasks";
     }
 }
 
@@ -766,9 +794,6 @@ async function doFetchFilesOnly() {
     els.statusMessage.classList.add('hidden');
     els.lists['files'].classList.remove('hidden');
     renderSkeletons(els.lists['files'], 4);
-
-    els.refreshBtn.classList.add('spinning');
-    els.btnText.textContent = "Fetching...";
 
     try {
         let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -822,8 +847,6 @@ async function doFetchFilesOnly() {
 
             els.moduleSelectorModal.classList.add('visible');
 
-            els.refreshBtn.classList.remove('spinning');
-            els.btnText.textContent = "Fetch Files";
             // Restore file list if we have files
             if (State.files.length > 0) renderFiles();
             else {
@@ -874,8 +897,6 @@ function resetFileFetchButtons() {
     if (State.files.length === 0) {
         els.fetchFilesInitialBtn.classList.remove('hidden');
     }
-    els.refreshBtn.classList.remove('spinning');
-    els.btnText.textContent = "Fetch Files";
 }
 
 function saveAndRenderFiles() {
@@ -920,19 +941,27 @@ els.scanModulesBtn.addEventListener('click', async () => {
 
     const targetLinks = selectedIndices.map(i => State.pendingModuleLinks[i]);
 
-    // Show loading state
+    // Show loading state with an inline progress strip above the skeletons.
     els.statusMessage.classList.add('hidden');
     els.lists['files'].classList.remove('hidden');
     renderSkeletons(els.lists['files'], 4);
-    els.refreshBtn.classList.add('spinning');
-    els.btnText.textContent = "Fetching...";
+    els.lists['files'].insertAdjacentHTML('afterbegin', `
+        <div id="scan-status" class="scan-status">
+            <span id="scan-status-text">Starting scan…</span>
+            <div class="scan-bar"><div id="scan-bar-fill" class="scan-bar-fill"></div></div>
+        </div>
+    `);
 
     const allFiles = [];
 
     try {
         for (let i = 0; i < targetLinks.length; i++) {
             const link = targetLinks[i];
-            els.btnText.textContent = `${i + 1}/${targetLinks.length}`;
+            const pct = Math.round(((i + 1) / targetLinks.length) * 100);
+            const statusText = document.getElementById('scan-status-text');
+            const barFill    = document.getElementById('scan-bar-fill');
+            if (statusText) statusText.textContent = `${i + 1} / ${targetLinks.length} — ${link.title}`;
+            if (barFill)    barFill.style.width = `${pct}%`;
 
             try {
                 const response = await fetch(link.url);
@@ -1027,7 +1056,28 @@ function loadCache() {
             // Check if we're on files tab and need to show warning
             showFileWarningIfNeeded();
         }
+
+        // Load dark mode preference
+        if (items.darkMode) {
+            State.darkMode = items.darkMode;
+            applyTheme(State.darkMode);
+            els.darkMode.checked = true;
+        }
     });
+}
+
+// ============================================================
+// Theme Management
+// ============================================================
+
+function applyTheme(isDark) {
+    document.body.setAttribute('data-theme', isDark ? 'dark' : 'light');
+}
+
+function toggleDarkMode(enabled) {
+    State.darkMode = enabled;
+    applyTheme(enabled);
+    chrome.storage.local.set({ darkMode: enabled });
 }
 
 document.addEventListener('DOMContentLoaded', loadCache);

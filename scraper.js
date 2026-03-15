@@ -169,7 +169,13 @@ function findFilesOnPage(doc, subject, taskName, sourceUrl) {
         // Match /files/download/ or specific extensions
         if (href.includes("/files/") || href.includes("/download/") || fileExtensions.test(href.split('?')[0])) {
             isFile = true;
-            fileUrl = href.startsWith('http') ? href : BASE_URL + href;
+            if (href.startsWith('http')) {
+                fileUrl = href;
+            } else if (href.startsWith('//')) {
+                fileUrl = 'https:' + href;
+            } else {
+                fileUrl = BASE_URL + href;
+            }
         }
 
         if (isFile && !seenUrls.has(fileUrl)) {
