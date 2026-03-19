@@ -163,6 +163,17 @@ function esc(s) {
     return d.innerHTML;
 }
 
+/** Strips garbage patterns from raw subject strings scraped from the LMS. */
+function cleanSubject(s) {
+    if (!s) return s;
+    return s
+        .replace(/^\s*-\s*|\s*-\s*$/g, '')
+        .replace(/\[\d+\]/g, '')
+        .replace(/\[([^\]]+)\]/g, (m, g) => g)
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 function parseDate(rawString) {
     if (!rawString || rawString === "No Due Date" || rawString === "Check Link") return null;
     const match = rawString.match(/^[A-Z][a-z]{2}\s\d+/);
@@ -732,7 +743,7 @@ async function doFetch() {
                 const text = await response.text();
                 const doc = parser.parseFromString(text, "text/html");
 
-                const tasks = parseSubjectPage(doc, link.subject, link.url);
+                const tasks = parseSubjectPage(doc, cleanSubject(link.subject), link.url);
                 allTasks.push(...tasks);
 
                 // Fetch all task pages in parallel instead of sequentially
@@ -836,7 +847,7 @@ async function doFetchFilesOnly() {
 
         if (context.sidebarLinks && context.sidebarLinks.length > 0) {
             State.pendingModuleLinks = context.sidebarLinks;
-            State.pendingSubject = context.subject;
+            State.pendingSubject = cleanSubject(context.subject);
 
             els.moduleList.innerHTML = context.sidebarLinks.map((link, i) => `
                 <div class="module-item">
