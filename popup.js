@@ -5,7 +5,12 @@ const State = {
     activeTab: 'tasks',
     dismissedFileWarning: false,
     currentTabUrl: '',
-    darkMode: false
+    darkMode: false,
+    notionSyncEnabled: false,
+    completedTaskIds: new Set(),
+    searchQuery: '',
+    subjectFilter: '',
+    sortBy: 'dueDate'
 };
 
 // --- Curated subject color palette for dark mode ---
@@ -34,51 +39,69 @@ const ICONS = {
     toastInfo: '<svg class="toast-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M8 7v4"/><circle cx="8" cy="5" r="0.5" fill="currentColor"/></svg>',
 };
 
-// UI Elements
+// UI Elements - with defensive DOM access via getEl helper
+function getEl(id) {
+    const el = document.getElementById(id);
+    if (!el) console.warn(`[UDScraper] Missing DOM element: #${id}`);
+    return el;
+}
+
 const els = {
-    settingsBtn: document.getElementById('settingsBtn'),
-    closeSettingsBtn: document.getElementById('closeSettingsBtn'),
-    settingsPanel: document.getElementById('settings-panel'),
-    settingsBackdrop: document.getElementById('settings-backdrop'),
+    settingsBtn: getEl('settingsBtn'),
+    closeSettingsBtn: getEl('closeSettingsBtn'),
+    settingsPanel: getEl('settings-panel'),
+    settingsBackdrop: getEl('settings-backdrop'),
     tabBar: document.querySelector('.tab-bar'),
-    tabIndicator: document.getElementById('tab-indicator'),
+    tabIndicator: getEl('tab-indicator'),
     tabs: document.querySelectorAll('.tab'),
-    dueBadge: document.getElementById('due-badge'),
-    statusMessage: document.getElementById('status-message'),
-    statusText: document.getElementById('status-text'),
-    emptyTitle: document.getElementById('empty-title'),
-    fetchInitialBtn: document.getElementById('fetchInitialBtn'),
-    fetchFilesInitialBtn: document.getElementById('fetchFilesInitialBtn'),
-    fileWarning: document.getElementById('fileWarning'),
-    dismissFileWarning: document.getElementById('dismissFileWarning'),
-    dismissFileWarningBtn: document.getElementById('dismissFileWarningBtn'),
+    dueBadge: getEl('due-badge'),
+    statusMessage: getEl('status-message'),
+    statusText: getEl('status-text'),
+    emptyTitle: getEl('empty-title'),
+    fetchInitialBtn: getEl('fetchInitialBtn'),
+    fetchFilesInitialBtn: getEl('fetchFilesInitialBtn'),
+    fileWarning: getEl('fileWarning'),
+    dismissFileWarning: getEl('dismissFileWarning'),
+    dismissFileWarningBtn: getEl('dismissFileWarningBtn'),
     lists: {
-        'tasks': document.getElementById('tasks-list'),
-        'due-soon': document.getElementById('due-soon-list'),
-        'files': document.getElementById('files-list')
+        'tasks': getEl('tasks-list'),
+        'due-soon': getEl('due-soon-list'),
+        'files': getEl('files-list')
     },
-    actionBar: document.getElementById('action-bar'),
-    selectedCount: document.getElementById('selected-count'),
-    closeActionsBtn: document.getElementById('closeActionsBtn'),
-    exportBtn: document.getElementById('exportBtn'),
-    exportSelect: document.getElementById('exportSelect'),
-    progressFill: document.getElementById('progress-fill'),
-    toastContainer: document.getElementById('toast-container'),
+    actionBar: getEl('action-bar'),
+    selectedCount: getEl('selected-count'),
+    closeActionsBtn: getEl('closeActionsBtn'),
+    exportBtn: getEl('exportBtn'),
+    exportSelect: getEl('exportSelect'),
+    progressFill: getEl('progress-fill'),
+    toastContainer: getEl('toast-container'),
 
     // Settings
-    saveKeysBtn: document.getElementById('saveKeysBtn'),
-    clearDataBtn: document.getElementById('clearDataBtn'),
-    apiKey: document.getElementById('apiKey'),
-    dbId: document.getElementById('dbId'),
-    settingsStatus: document.getElementById('settings-status'),
-    darkMode: document.getElementById('darkMode'),
+    saveKeysBtn: getEl('saveKeysBtn'),
+    clearDataBtn: getEl('clearDataBtn'),
+    apiKey: getEl('apiKey'),
+    dbId: getEl('dbId'),
+    settingsStatus: getEl('settings-status'),
+    darkMode: getEl('darkMode'),
+    notionSyncToggle: getEl('notionSyncToggle'),
+    notionCredentialsSection: getEl('notionCredentialsSection'),
+
+    // Task Controls
+    taskControls: getEl('task-controls'),
+    taskSearch: getEl('taskSearch'),
+    subjectFilterBtn: getEl('subjectFilterBtn'),
+    subjectFilterLabel: getEl('subjectFilterLabel'),
+    subjectFilterDropdown: getEl('subjectFilterDropdown'),
+    sortSelectBtn: getEl('sortSelectBtn'),
+    sortSelectLabel: getEl('sortSelectLabel'),
+    sortSelectDropdown: getEl('sortSelectDropdown'),
 
     // Modal
-    moduleSelectorModal: document.getElementById('moduleSelectorModal'),
-    moduleList: document.getElementById('moduleList'),
-    selectAllModules: document.getElementById('selectAllModules'),
-    cancelModuleBtn: document.getElementById('cancelModuleBtn'),
-    scanModulesBtn: document.getElementById('scanModulesBtn')
+    moduleSelectorModal: getEl('moduleSelectorModal'),
+    moduleList: getEl('moduleList'),
+    selectAllModules: getEl('selectAllModules'),
+    cancelModuleBtn: getEl('cancelModuleBtn'),
+    scanModulesBtn: getEl('scanModulesBtn')
 };
 
 // ============================================================
@@ -232,6 +255,8 @@ function getFileTypeClass(ext) {
 const REFRESH_ICON = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1v5h5"/><path d="M3.51 10a6 6 0 1 0 .49-5L1 6"/></svg>`;
 
 function renderTasks() {
+    els.taskControls.classList.remove('hidden');
+
     const taskCount = State.tasks.length;
     const taskToolbar = `
         <div class="list-top-header">
@@ -249,18 +274,41 @@ function renderTasks() {
     els.lists['tasks'].innerHTML = taskToolbar;
     els.lists['due-soon'].innerHTML = taskToolbar.replace('id="refreshTasksBtn"', 'id="refreshDueSoonBtn"');
 
-    const sortedTasks = [...State.tasks].sort((a, b) => {
-        const da = parseDate(a.date);
-        const db = parseDate(b.date);
-        if (!da && !db) return 0;
-        if (!da) return 1;
-        if (!db) return -1;
-        return da - db;
+    const filteredTasks = State.tasks.filter(task => {
+        const matchesSearch = !State.searchQuery || 
+            task.name.toLowerCase().includes(State.searchQuery.toLowerCase());
+        const matchesSubject = !State.subjectFilter || 
+            task.subject === State.subjectFilter;
+        return matchesSearch && matchesSubject;
     });
+
+    const activeTasks = filteredTasks.filter(t => !State.completedTaskIds.has(t.id));
+    const completedTasks = filteredTasks.filter(t => State.completedTaskIds.has(t.id));
+
+    const sortTasks = (tasks) => {
+        return [...tasks].sort((a, b) => {
+            if (State.sortBy === 'dueDate') {
+                const da = parseDate(a.date);
+                const db = parseDate(b.date);
+                if (!da && !db) return 0;
+                if (!da) return 1;
+                if (!db) return -1;
+                return da - db;
+            } else if (State.sortBy === 'subject') {
+                return a.subject.localeCompare(b.subject);
+            } else if (State.sortBy === 'name') {
+                return a.name.localeCompare(b.name);
+            }
+            return 0;
+        });
+    };
+
+    const sortedActive = sortTasks(activeTasks);
+    const sortedCompleted = sortTasks(completedTasks);
 
     let dueSoonCount = 0;
 
-    sortedTasks.forEach((task, index) => {
+    sortedActive.forEach((task, index) => {
         const urgency = getUrgencyInfo(task.date);
         const color = getSubjectColor(task.subject);
         const d = parseDate(task.date);
@@ -305,7 +353,52 @@ function renderTasks() {
         }
     });
 
-    // Handle due soon badge
+    if (sortedCompleted.length > 0) {
+        els.lists['tasks'].insertAdjacentHTML('beforeend', `
+            <div class="task-section-divider">Completed (${sortedCompleted.length})</div>
+        `);
+        
+        sortedCompleted.forEach((task, index) => {
+            const urgency = getUrgencyInfo(task.date);
+            const color = getSubjectColor(task.subject);
+            const d = parseDate(task.date);
+
+            let isDueSoon = false;
+            if (d) {
+                const now = new Date();
+                now.setHours(0, 0, 0, 0);
+                const target = new Date(d);
+                target.setHours(0, 0, 0, 0);
+                const diffDays = Math.ceil((target - now) / (1000 * 60 * 60 * 24));
+                if (diffDays <= 3) isDueSoon = true;
+            }
+
+            const urgencyAttr = urgency.urgency ? `data-urgency="${urgency.urgency}"` : '';
+            const urgencyBadge = urgency.class
+                ? `<span class="urgency-badge ${urgency.class}">${urgency.label}</span>`
+                : `<span class="due-text">${urgency.label}</span>`;
+
+            const rowHTML = `
+                <div class="task-row task-done" ${urgencyAttr} style="animation-delay:${Math.min(index * 40, 200)}ms">
+                    <label class="checkbox-wrapper">
+                        <input type="checkbox" class="task-checkbox" data-id="${task.id}" checked>
+                        <span class="checkbox-custom">${ICONS.check}</span>
+                    </label>
+                    <div class="task-info">
+                        <span class="task-name" title="${esc(task.name)}">${esc(task.name)}</span>
+                        <div class="task-meta">
+                            <span class="subject-pill" style="background:${color.bg}; color:${color.text}; border:1px solid ${color.border}">${esc(task.subject)}</span>
+                            ${urgencyBadge}
+                        </div>
+                    </div>
+                    <a href="${esc(task.link)}" target="_blank" class="task-link" title="Open Task">${ICONS.externalLink}</a>
+                </div>
+            `;
+
+            els.lists['tasks'].insertAdjacentHTML('beforeend', rowHTML);
+        });
+    }
+
     if (dueSoonCount > 0) {
         els.dueBadge.textContent = dueSoonCount;
         els.dueBadge.classList.remove('hidden');
@@ -325,8 +418,27 @@ function renderTasks() {
         `;
     }
 
+    updateSubjectFilterOptions();
     attachCheckboxListeners();
     updateActionBar();
+}
+
+function updateSubjectFilterOptions() {
+    const subjects = [...new Set(State.tasks.map(t => t.subject))].sort();
+    
+    let optionsHtml = `<div class="custom-select-option ${!State.subjectFilter ? 'selected' : ''}" data-value="">All Subjects</div>`;
+    subjects.forEach(s => {
+        optionsHtml += `<div class="custom-select-option ${State.subjectFilter === s ? 'selected' : ''}" data-value="${esc(s)}">${esc(s)}</div>`;
+    });
+    
+    els.subjectFilterDropdown.innerHTML = optionsHtml;
+    
+    if (State.subjectFilter && subjects.includes(State.subjectFilter)) {
+        els.subjectFilterLabel.textContent = State.subjectFilter;
+    } else {
+        els.subjectFilterLabel.textContent = 'All Subjects';
+        State.subjectFilter = '';
+    }
 }
 
 function renderFiles() {
@@ -409,7 +521,7 @@ function renderFiles() {
     els.lists['files'].innerHTML = filesHTML;
 
     // Attach File Listeners
-    document.getElementById('clearFilesBtn').addEventListener('click', () => {
+    getEl('clearFilesBtn').addEventListener('click', () => {
         State.files = [];
         chrome.storage.local.get(['lastScrape'], (items) => {
             const cache = items.lastScrape || { tasks: [], files: [] };
@@ -439,6 +551,24 @@ function renderFiles() {
 }
 
 // ============================================================
+// Task Completion
+// ============================================================
+
+function toggleTaskComplete(taskId) {
+    if (State.completedTaskIds.has(taskId)) {
+        State.completedTaskIds.delete(taskId);
+    } else {
+        State.completedTaskIds.add(taskId);
+    }
+    persistCompletedTasks();
+    renderTasks();
+}
+
+function persistCompletedTasks() {
+    chrome.storage.local.set({ completedTaskIds: [...State.completedTaskIds] });
+}
+
+// ============================================================
 // Selection & Action Bar
 // ============================================================
 
@@ -446,14 +576,23 @@ function attachCheckboxListeners() {
     document.querySelectorAll('.task-checkbox').forEach(cb => {
         cb.addEventListener('change', (e) => {
             const id = e.target.dataset.id;
-            if (e.target.checked) State.selectedIds.add(id);
-            else State.selectedIds.delete(id);
+            
+            if (e.target.checked) {
+                State.selectedIds.add(id);
+            } else {
+                State.selectedIds.delete(id);
+            }
 
             document.querySelectorAll(`.task-checkbox[data-id="${id}"]`).forEach(box => {
                 box.checked = e.target.checked;
             });
 
             updateActionBar();
+        });
+
+        cb.addEventListener('dblclick', (e) => {
+            const id = e.target.dataset.id;
+            toggleTaskComplete(id);
         });
     });
 
@@ -496,10 +635,12 @@ function switchTab(tabId) {
     els.lists[tabId].classList.remove('hidden');
     State.activeTab = tabId;
 
-    // Data-driven: always decide whether to show status-message based on
-    // whether the active tab actually has data. The old guard
-    // (!statusMessage.classList.contains('hidden')) was the bug —
-    // it left status-message visible when switching to a loaded files tab.
+    if (tabId === 'files') {
+        els.taskControls.classList.add('hidden');
+    } else if (State.tasks.length > 0) {
+        els.taskControls.classList.remove('hidden');
+    }
+
     const hasData = tabId === 'files' ? State.files.length > 0 : State.tasks.length > 0;
 
     if (hasData) {
@@ -537,8 +678,27 @@ els.tabs.forEach(tab => {
 // ============================================================
 
 function openSettings() {
+    updateNotionSettingsVisibility();
     els.settingsPanel.classList.add('open');
     els.settingsBackdrop.classList.add('visible');
+}
+
+function updateNotionSettingsVisibility() {
+    if (State.notionSyncEnabled) {
+        els.notionCredentialsSection.classList.remove('hidden');
+    } else {
+        els.notionCredentialsSection.classList.add('hidden');
+    }
+}
+
+function updateExportDropdown() {
+    const notionOption = els.exportSelect.querySelector('option[value="notion"]');
+    if (notionOption) {
+        notionOption.style.display = State.notionSyncEnabled ? '' : 'none';
+    }
+    if (!State.notionSyncEnabled && els.exportSelect.value === 'notion') {
+        els.exportSelect.value = 'text';
+    }
 }
 
 function closeSettings() {
@@ -574,25 +734,55 @@ els.clearDataBtn.addEventListener('click', () => {
         State.tasks = [];
         State.files = [];
         State.selectedIds.clear();
+        State.completedTaskIds.clear();
+        State.searchQuery = '';
+        State.subjectFilter = '';
+        State.sortBy = 'dueDate';
+        State.notionSyncEnabled = false;
         els.apiKey.value = '';
         els.dbId.value = '';
+        els.notionSyncToggle.checked = false;
+        updateExportDropdown();
         els.lists['tasks'].innerHTML = '';
         els.lists['due-soon'].innerHTML = '';
         els.lists['files'].innerHTML = '';
         els.dueBadge.classList.add('hidden');
+        els.taskControls.classList.add('hidden');
+        els.taskSearch.value = '';
+        els.subjectFilterLabel.textContent = 'All Subjects';
+        els.sortSelectLabel.textContent = 'Due Date';
         els.statusMessage.classList.remove('hidden');
-        els.emptyTitle.textContent = "No tasks yet";
+        els.emptyTitle.textContent = "Welcome to UDScraper";
         els.statusText.textContent = "Open your dashboard and fetch your assignments";
         els.fetchInitialBtn.classList.remove('hidden');
         updateActionBar();
         closeSettings();
         showToast('All data cleared', 'info');
+        
+        chrome.runtime.sendMessage({
+            action: 'updateBadge',
+            count: 0,
+            hasOverdue: false
+        });
     });
 });
 
 // Dark Mode Toggle
 els.darkMode.addEventListener('change', (e) => {
     toggleDarkMode(e.target.checked);
+});
+
+// Notion Sync Toggle
+els.notionSyncToggle.addEventListener('change', (e) => {
+    State.notionSyncEnabled = e.target.checked;
+    chrome.storage.local.set({ notionSyncEnabled: e.target.checked });
+    updateNotionSettingsVisibility();
+    updateExportDropdown();
+    if (!State.notionSyncEnabled) {
+        showToast('Notion sync disabled', 'info');
+    } else {
+        showToast('Notion sync enabled', 'success');
+    }
 });
 
 // Close Actions
@@ -687,6 +877,90 @@ els.exportBtn.addEventListener('click', async () => {
 els.fetchInitialBtn.addEventListener('click', doFetch);
 els.fetchFilesInitialBtn.addEventListener('click', doFetchFilesOnly);
 
+let searchDebounceTimer;
+els.taskSearch.addEventListener('input', (e) => {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+        State.searchQuery = e.target.value;
+        if (State.tasks.length > 0) renderTasks();
+    }, 150);
+});
+
+function toggleDropdown(dropdown) {
+    const isHidden = dropdown.classList.contains('hidden');
+    document.querySelectorAll('.custom-select-dropdown').forEach(d => d.classList.add('hidden'));
+    if (isHidden) {
+        dropdown.classList.remove('hidden');
+    }
+}
+
+els.subjectFilterBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleDropdown(els.subjectFilterDropdown);
+    els.sortSelectDropdown.classList.add('hidden');
+});
+
+els.sortSelectBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleDropdown(els.sortSelectDropdown);
+    els.subjectFilterDropdown.classList.add('hidden');
+});
+
+document.addEventListener('click', () => {
+    document.querySelectorAll('.custom-select-dropdown').forEach(d => d.classList.add('hidden'));
+});
+
+els.subjectFilterDropdown.addEventListener('click', (e) => {
+    const option = e.target.closest('.custom-select-option');
+    if (!option) return;
+    
+    const value = option.dataset.value;
+    const label = option.textContent;
+    
+    State.subjectFilter = value;
+    els.subjectFilterLabel.textContent = label;
+    els.subjectFilterDropdown.classList.add('hidden');
+    
+    document.querySelectorAll('#subjectFilterDropdown .custom-select-option').forEach(opt => {
+        opt.classList.toggle('selected', opt.dataset.value === value);
+    });
+    
+    if (State.tasks.length > 0) renderTasks();
+});
+
+els.sortSelectDropdown.addEventListener('click', (e) => {
+    const option = e.target.closest('.custom-select-option');
+    if (!option) return;
+    
+    const value = option.dataset.value;
+    const label = option.textContent;
+    
+    State.sortBy = value;
+    els.sortSelectLabel.textContent = label;
+    els.sortSelectDropdown.classList.add('hidden');
+    
+    document.querySelectorAll('#sortSelectDropdown .custom-select-option').forEach(opt => {
+        opt.classList.toggle('selected', opt.dataset.value === value);
+    });
+    
+    if (State.tasks.length > 0) renderTasks();
+});
+
+// ============================================================
+// Keyboard Shortcuts
+// ============================================================
+
+document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (els.settingsPanel.classList.contains('open')) return;
+    
+    if (e.key.toLowerCase() === 'r') {
+        doFetch();
+    } else if (e.key.toLowerCase() === 's') {
+        openSettings();
+    }
+});
+
 // Delegate clicks on dynamically-rendered refresh buttons inside each list.
 els.lists['tasks'].addEventListener('click', e => { if (e.target.closest('#refreshTasksBtn')) doFetch(); });
 els.lists['due-soon'].addEventListener('click', e => { if (e.target.closest('#refreshDueSoonBtn')) doFetch(); });
@@ -703,7 +977,40 @@ els.dismissFileWarningBtn.addEventListener('click', () => {
     els.fetchFilesInitialBtn.classList.remove('hidden');
 });
 
+async function safeScriptExecute(tabId, options, errorKey) {
+    try {
+        return await chrome.scripting.executeScript({ target: { tabId }, ...options });
+    } catch (err) {
+        console.error(`[UDScraper] Script execution failed (${errorKey}):`, err);
+        return null;
+    }
+}
+
+const SCRIPT_ERROR_MESSAGES = {
+    'scraper injection': { title: "Error", text: "Could not load page scanner. Try reloading the extension." },
+    'widget scrape': { title: "Error", text: "Could not read tasks. Try refreshing the page." },
+    'context fetch': { title: "Error", text: "Could not read page content. Try refreshing the page." },
+    'module scan': { title: "Error", text: "Could not scan for modules. Try refreshing the page." },
+    'file scan': { title: "Error", text: "Could not scan for files. Try refreshing the page." }
+};
+
+function showScriptError(errorKey, listId) {
+    const msg = SCRIPT_ERROR_MESSAGES[errorKey] || { title: "Error", text: "Script execution failed. Try refreshing the page." };
+    if (listId) {
+        els.lists[listId]?.classList.add('hidden');
+    }
+    els.statusMessage.classList.remove('hidden');
+    els.emptyTitle.textContent = msg.title;
+    els.statusText.textContent = msg.text;
+    showToast(msg.text, 'error');
+}
+
+let isFetching = false;
+
 async function doFetch() {
+    if (isFetching) return;
+    isFetching = true;
+
     els.statusMessage.classList.add('hidden');
     els.lists['tasks'].classList.remove('hidden');
     renderSkeletons(els.lists['tasks'], 5);
@@ -725,12 +1032,14 @@ async function doFetch() {
             return;
         }
 
-        const results = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: scrapeWidgetLinks
-        });
+        const results = await safeScriptExecute(tab.id, { func: scrapeWidgetLinks }, 'widget scrape');
+        if (!results) {
+            showScriptError('widget scrape', 'tasks');
+            els.fetchInitialBtn.classList.remove('hidden');
+            return;
+        }
 
-        if (!results || !results[0] || !results[0].result) {
+        if (!results[0] || !results[0].result) {
             els.lists['tasks'].classList.add('hidden');
             els.statusMessage.classList.remove('hidden');
             els.emptyTitle.textContent = "No widget found";
@@ -766,7 +1075,6 @@ async function doFetch() {
                 const tasks = parseSubjectPage(doc, cleanSubject(link.subject), link.url);
                 allTasks.push(...tasks);
 
-                // Fetch all task pages in parallel instead of sequentially
                 const taskPageResults = await Promise.all(
                     tasks
                         .filter(task => task.link && task.link !== link.url)
@@ -789,8 +1097,6 @@ async function doFetch() {
             }
         }
 
-        // Deduplicate by stable ID — the same task can appear under multiple subjects
-        // if the widget lists it more than once.
         const uniqueTasks = [...new Map(allTasks.map(t => [t.id, t])).values()];
 
         if (uniqueTasks.length === 0) {
@@ -807,6 +1113,7 @@ async function doFetch() {
             };
             chrome.storage.local.set({ lastScrape: cache }, () => {
                 loadCache();
+                updateBadge();
             });
             showToast(`Found ${uniqueTasks.length} tasks${allFiles.length > 0 ? ` and ${allFiles.length} files` : ''}`, 'success');
         }
@@ -818,10 +1125,15 @@ async function doFetch() {
         els.statusText.textContent = "Error scanning. Check your connection.";
         els.fetchInitialBtn.classList.remove('hidden');
         showToast('Scan failed', 'error');
+    } finally {
+        isFetching = false;
     }
 }
 
 async function doFetchFilesOnly() {
+    if (isFetching) return;
+    isFetching = true;
+
     els.statusMessage.classList.add('hidden');
     els.lists['files'].classList.remove('hidden');
     renderSkeletons(els.lists['files'], 4);
@@ -847,21 +1159,28 @@ async function doFetchFilesOnly() {
             return;
         }
 
-        // Inject scraper.js into the page so we can call its functions directly,
-        // eliminating the duplicated sidebar and file-scan logic.
-        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['scraper.js'] });
+        const injectionResult = await safeScriptExecute(tab.id, { files: ['scraper.js'] }, 'scraper injection');
+        if (!injectionResult) {
+            showScriptError('scraper injection', 'files');
+            resetFileFetchButtons();
+            return;
+        }
 
-        const results = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
+        const results = await safeScriptExecute(tab.id, {
             func: () => ({
                 subject: scrapeSubjectName(),
                 sidebarLinks: scrapeSidebarModules() || [],
                 currentHref: location.href,
                 currentTitle: document.title
             })
-        });
+        }, 'context fetch');
+        if (!results) {
+            showScriptError('context fetch', 'files');
+            resetFileFetchButtons();
+            return;
+        }
 
-        if (!results || !results[0] || !results[0].result) throw new Error("Could not parse page context.");
+        if (!results[0] || !results[0].result) throw new Error("Could not parse page context.");
 
         const context = results[0].result;
 
@@ -878,7 +1197,6 @@ async function doFetchFilesOnly() {
 
             els.moduleSelectorModal.classList.add('visible');
 
-            // Restore file list if we have files
             if (State.files.length > 0) renderFiles();
             else {
                 els.lists['files'].classList.add('hidden');
@@ -887,16 +1205,19 @@ async function doFetchFilesOnly() {
             return;
         }
 
-        // Fallback: No Sidebar — scan the current page directly using the injected findFilesOnPage.
         showToast('No modules found. Scanning current page...', 'info', 2000);
 
-        const fileResults = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
+        const fileResults = await safeScriptExecute(tab.id, {
             func: (subj, taskName, sourceUrl) => findFilesOnPage(document, subj, taskName, sourceUrl),
             args: [context.subject, context.currentTitle || "Current Page", context.currentHref]
-        });
+        }, 'file scan');
+        if (!fileResults) {
+            showScriptError('file scan', 'files');
+            resetFileFetchButtons();
+            return;
+        }
 
-        if (!fileResults || !fileResults[0] || !fileResults[0].result || fileResults[0].result.length === 0) {
+        if (!fileResults[0] || !fileResults[0].result || fileResults[0].result.length === 0) {
             els.lists['files'].classList.add('hidden');
             els.statusMessage.classList.remove('hidden');
             els.emptyTitle.textContent = "No files found";
@@ -920,6 +1241,8 @@ async function doFetchFilesOnly() {
         els.statusText.textContent = "Error scanning page.";
         resetFileFetchButtons();
         showToast('File scan failed', 'error');
+    } finally {
+        isFetching = false;
     }
 }
 
@@ -989,8 +1312,8 @@ els.scanModulesBtn.addEventListener('click', async () => {
         for (let i = 0; i < targetLinks.length; i++) {
             const link = targetLinks[i];
             const pct = Math.round(((i + 1) / targetLinks.length) * 100);
-            const statusText = document.getElementById('scan-status-text');
-            const barFill    = document.getElementById('scan-bar-fill');
+            const statusText = getEl('scan-status-text');
+            const barFill    = getEl('scan-bar-fill');
             if (statusText) statusText.textContent = `${i + 1} / ${targetLinks.length} — ${link.title}`;
             if (barFill)    barFill.style.width = `${pct}%`;
 
@@ -1037,22 +1360,30 @@ els.scanModulesBtn.addEventListener('click', async () => {
 // ============================================================
 
 function loadCache() {
-    chrome.storage.local.get(['lastScrape', 'notionToken', 'notionDbId', 'dismissedFileWarning'], (items) => {
+    chrome.storage.local.get(['lastScrape', 'notionToken', 'notionDbId', 'dismissedFileWarning', 'completedTaskIds', 'notionSyncEnabled'], (items) => {
         if (items.notionToken) els.apiKey.value = items.notionToken;
         if (items.notionDbId) els.dbId.value = items.notionDbId;
         State.dismissedFileWarning = items.dismissedFileWarning || false;
+        State.notionSyncEnabled = items.notionSyncEnabled || false;
+        els.notionSyncToggle.checked = State.notionSyncEnabled;
+        updateExportDropdown();
+
+        if (items.completedTaskIds && Array.isArray(items.completedTaskIds)) {
+            State.completedTaskIds = new Set(items.completedTaskIds);
+        }
 
         const cache = items.lastScrape;
+        const AUTO_REFRESH_MS = 12 * 60 * 60 * 1000;
+        
         if (cache && cache.tasks && cache.tasks.length > 0) {
-            // Backfill IDs for tasks cached before this field was added.
             State.tasks = cache.tasks.map(t => t.id ? t : { ...t, id: hashStr(t.subject + t.name + t.link) });
             State.files = cache.files || [];
 
             els.statusMessage.classList.add('hidden');
             renderTasks();
             renderFiles();
+            updateBadge();
 
-            // Determine default tab
             const dueSoonItems = cache.tasks.filter(t => {
                 const d = parseDate(t.date);
                 if (!d) return false;
@@ -1064,36 +1395,59 @@ function loadCache() {
 
             switchTab(dueSoonItems.length > 0 ? 'due-soon' : 'tasks');
 
+            if (cache.timestamp && Date.now() - cache.timestamp > AUTO_REFRESH_MS) {
+                doFetch();
+            }
+
         } else if (cache && cache.files && cache.files.length > 0) {
-            // Has files but no tasks
             State.files = cache.files;
             renderFiles();
             els.statusMessage.classList.remove('hidden');
+            els.taskControls.classList.add('hidden');
             els.emptyTitle.textContent = "No tasks yet";
             els.statusText.textContent = "Open your dashboard and fetch your assignments";
             showFileWarningIfNeeded();
         } else {
-            // First time or empty
             els.statusMessage.classList.remove('hidden');
-
-            if (!items.notionToken) {
-                els.emptyTitle.textContent = "Welcome to UDScraper";
-                els.statusText.textContent = "Set up your Notion credentials in Settings, then open your dashboard to get started.";
-            } else {
-                els.emptyTitle.textContent = "No tasks yet";
-                els.statusText.textContent = "Open your dashboard and fetch your assignments";
-            }
-            
-            // Check if we're on files tab and need to show warning
+            els.taskControls.classList.add('hidden');
+            els.emptyTitle.textContent = "Welcome to UDScraper";
+            els.statusText.textContent = "Open your dashboard and fetch your assignments";
             showFileWarningIfNeeded();
         }
 
-        // Load dark mode preference
         if (items.darkMode) {
             State.darkMode = items.darkMode;
             applyTheme(State.darkMode);
             els.darkMode.checked = true;
         }
+    });
+}
+
+function updateBadge() {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    
+    let overdueCount = 0;
+    let todayCount = 0;
+
+    State.tasks.forEach(task => {
+        if (State.completedTaskIds.has(task.id)) return;
+        const d = parseDate(task.date);
+        if (!d) return;
+        const target = new Date(d);
+        target.setHours(0, 0, 0, 0);
+        const diffDays = Math.ceil((target - now) / (1000 * 60 * 60 * 24));
+        
+        if (diffDays < 0) overdueCount++;
+        else if (diffDays === 0) todayCount++;
+    });
+
+    const total = overdueCount + todayCount;
+    
+    chrome.runtime.sendMessage({
+        action: 'updateBadge',
+        count: total,
+        hasOverdue: overdueCount > 0
     });
 }
 

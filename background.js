@@ -1,10 +1,12 @@
 /**
- * Listens for messages from the popup to send tasks to Notion.
+ * Listens for messages from the popup to send tasks to Notion or update badge.
  * @param {Object} request - The message request object
- * @param {string} request.action - The action type ('sendToNotion')
- * @param {Array} request.tasks - Array of task objects to upload
- * @param {string} request.token - Notion API bearer token
- * @param {string} request.dbId - Target Notion database ID
+ * @param {string} request.action - The action type ('sendToNotion' or 'updateBadge')
+ * @param {Array} request.tasks - Array of task objects to upload (for 'sendToNotion')
+ * @param {string} request.token - Notion API bearer token (for 'sendToNotion')
+ * @param {string} request.dbId - Target Notion database ID (for 'sendToNotion')
+ * @param {number} request.count - Badge count (for 'updateBadge')
+ * @param {boolean} request.hasOverdue - Whether there are overdue tasks (for 'updateBadge')
  * @param {Object} sender - Message sender information
  * @param {Function} sendResponse - Callback to send response back
  * @returns {boolean} True to indicate async response
@@ -16,7 +18,82 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         return true;
     }
+    
+    if (request.action === "updateBadge") {
+        updateBadge(request.count, request.hasOverdue);
+        sendResponse({ success: true });
+        return true;
+    }
 });
+
+function updateBadge(count, hasOverdue) {
+    if (count > 0) {
+        chrome.action.setBadgeText({ text: String(count) });
+        chrome.action.setBadgeBackgroundColor({ 
+            color: hasOverdue ? '#dc2626' : '#ea580c' 
+        });
+    } else {
+        chrome.action.setBadgeText({ text: '' });
+    }
+}
+
+/**
+ * Validates that the Notion database has the required columns.
+ * Required columns: Name (title), Subject, Due Date, Link
+ *
+ * @param {string} token - Notion API bearer token
+ * @param {string} dbId - Target Notion database ID
+ * @returns {Promise<{valid: boolean, missing: string[], error?: string}>}
+ */
+async function validateDatabaseSchema(token, dbId) {
+    try {
+        const response = await fetch(`https://api.notion.com/v1/databases/${dbId}`, {
+            method: "GET",
+            headers: {
+                "Authorization": `Bearer ${token}`,
+                "Notion-Version": "2022-06-28"
+            }
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            if (err.code === 'object_not_found') {
+                return { valid: false, missing: [], error: "Database not found. Please check the Database ID." };
+            }
+            return { valid: false, missing: [], error: `Database error: ${err.message || 'Unknown error'}` };
+        }
+
+        const db = await response.json();
+        const properties = db.properties || {};
+        const missing = [];
+
+        // Check for Name (title) property - it might be named differently
+        const titleProp = Object.entries(properties).find(([key, prop]) => prop.type === 'title');
+        if (!titleProp) {
+            missing.push('Name (title)');
+        }
+
+        // Check for Subject property
+        if (!properties['Subject']) {
+            missing.push('Subject');
+        }
+
+        // Check for Due Date property (can be date type or rich_text)
+        if (!properties['Due Date']) {
+            missing.push('Due Date');
+        }
+
+        // Check for Link property (url type)
+        if (!properties['Link']) {
+            missing.push('Link (URL)');
+        }
+
+        return { valid: missing.length === 0, missing };
+    } catch (error) {
+        console.error("Schema validation error:", error);
+        return { valid: false, missing: [], error: "Failed to validate database schema." };
+    }
+}
 
 /**
  * Pushes an array of task objects to a Notion database.
@@ -30,6 +107,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  */
 async function pushToNotion(tasks, token, dbId) {
     try {
+        // Validate schema first
+        const validation = await validateDatabaseSchema(token, dbId);
+        
+        if (!validation.valid) {
+            if (validation.error) {
+                return { success: false, message: validation.error };
+            }
+            const missingList = validation.missing.join(', ');
+            return { 
+                success: false, 
+                message: `Missing required columns in Notion database: ${missingList}. Please add these columns and try again.` 
+            };
+        }
+
         let successCount = 0;
         let failCount = 0;
 
