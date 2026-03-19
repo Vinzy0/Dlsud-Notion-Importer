@@ -235,6 +235,12 @@ function renderTasks() {
     const taskCount = State.tasks.length;
     const taskToolbar = `
         <div class="list-top-header">
+            <div class="checkbox-wrapper select-all-wrapper">
+                <input type="checkbox" id="selectAllTasks">
+                <div class="checkbox-custom">
+                    <svg class="check-icon" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </div>
+            </div>
             <span>${taskCount} task${taskCount !== 1 ? 's' : ''}</span>
             <button class="secondary-btn small list-refresh-btn" id="refreshTasksBtn">${REFRESH_ICON} Refresh</button>
         </div>
@@ -443,11 +449,24 @@ function attachCheckboxListeners() {
             if (e.target.checked) State.selectedIds.add(id);
             else State.selectedIds.delete(id);
 
-            // Sync identical checkboxes across tabs (tasks + due-soon share the same task)
             document.querySelectorAll(`.task-checkbox[data-id="${id}"]`).forEach(box => {
                 box.checked = e.target.checked;
             });
 
+            updateActionBar();
+        });
+    });
+
+    document.querySelectorAll('#selectAllTasks').forEach(cb => {
+        cb.addEventListener('change', (e) => {
+            const checked = e.target.checked;
+            State.tasks.forEach(task => {
+                if (checked) State.selectedIds.add(task.id);
+                else State.selectedIds.delete(task.id);
+            });
+            document.querySelectorAll('.task-checkbox').forEach(cb => {
+                cb.checked = checked;
+            });
             updateActionBar();
         });
     });
@@ -580,6 +599,7 @@ els.darkMode.addEventListener('change', (e) => {
 els.closeActionsBtn.addEventListener('click', () => {
     State.selectedIds.clear();
     document.querySelectorAll('.task-checkbox').forEach(cb => cb.checked = false);
+    document.querySelectorAll('#selectAllTasks').forEach(cb => cb.checked = false);
     updateActionBar();
 });
 

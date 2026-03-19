@@ -676,6 +676,10 @@ body {
     border-left: 3px solid var(--urgency-today);
 }
 
+.task-row[data-urgency="overdue"] {
+    background: var(--error-bg);
+}
+
 .task-row[data-urgency="tomorrow"] {
     border-left: 3px solid var(--urgency-tomorrow);
 }
@@ -747,16 +751,19 @@ body {
 
 .task-name {
     font-size: 13px;
-    font-weight: 500;
+    font-weight: 600;
     color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    flex-shrink: 1;
+    min-width: 0;
 }
 
 .task-meta {
     display: flex;
     align-items: center;
+    flex-shrink: 0;
     gap: var(--space-2);
     min-width: 70px;
     white-space: nowrap;
@@ -1173,6 +1180,18 @@ body {
     font-size: 16px;
     font-weight: 600;
     color: var(--text-primary);
+}
+
+.settings-footer {
+    padding: var(--space-3) var(--space-4);
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    border-top: 1px solid var(--border-subtle);
+}
+
+.select-all-wrapper {
+    margin-right: var(--space-2);
 }
 
 .settings-body {
