@@ -37,33 +37,54 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 });
 
-/**
- * Fetches and parses every subject page and its task pages for files.
- * Runs entirely in the background service worker so the popup can be closed
- * mid-scan without losing progress. Results are persisted to chrome.storage.local.
- *
- * @param {Array<{subject: string, url: string}>} subjectLinks
- */
+async function getOffscreenDocument() {
+    const existing = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+    if (existing.length > 0) return;
+    await chrome.offscreen.createDocument({
+        url: 'offscreen.html',
+        reasons: ['DOM_PARSER'],
+        justification: 'Parse HTML fetched from LMS pages'
+    });
+}
+
+async function parseSubjectPageOffscreen(html, subject, url) {
+    await getOffscreenDocument();
+    return new Promise(resolve => {
+        chrome.runtime.sendMessage(
+            { target: 'offscreen', action: 'parseSubjectPage', html, subject, url },
+            res => resolve(res?.tasks ?? [])
+        );
+    });
+}
+
+async function findFilesOnPageOffscreen(html, subject, taskName, url) {
+    await getOffscreenDocument();
+    return new Promise(resolve => {
+        chrome.runtime.sendMessage(
+            { target: 'offscreen', action: 'findFilesOnPage', html, subject, taskName, url },
+            res => resolve(res?.files ?? [])
+        );
+    });
+}
+
 async function runDeepScan(subjectLinks) {
-    const parser = new DOMParser();
     const allTasks = [];
     const allFiles = [];
 
     for (let i = 0; i < subjectLinks.length; i++) {
         const link = subjectLinks[i];
         try {
-            chrome.runtime.sendMessage({
-                action: 'scanProgress',
-                current: i + 1,
-                total: subjectLinks.length,
-                subject: link.subject,
-            }).catch(() => {});
+            chrome.runtime.sendMessage(
+                { action: 'scanProgress', current: i + 1, total: subjectLinks.length, subject: link.subject },
+                () => { void chrome.runtime.lastError; }
+            );
+        } catch (_) {}
 
+        try {
             const response = await fetch(link.url);
             const text = await response.text();
-            const doc = parser.parseFromString(text, 'text/html');
 
-            const tasks = parseSubjectPage(doc, cleanSubject(link.subject), link.url);
+            const tasks = await parseSubjectPageOffscreen(text, cleanSubject(link.subject), link.url);
             allTasks.push(...tasks);
 
             const taskPageResults = await Promise.all(
@@ -72,10 +93,7 @@ async function runDeepScan(subjectLinks) {
                     .map(task =>
                         fetch(task.link)
                             .then(r => r.text())
-                            .then(html => {
-                                const taskDoc = parser.parseFromString(html, 'text/html');
-                                return findFilesOnPage(taskDoc, task.subject, task.name, task.link);
-                            })
+                            .then(html => findFilesOnPageOffscreen(html, task.subject, task.name, task.link))
                             .catch(e => {
                                 Logger.error(`Error scanning task "${task.name}":`, e);
                                 return [];
