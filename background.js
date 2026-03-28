@@ -49,8 +49,16 @@ async function runDeepScan(subjectLinks) {
     const allTasks = [];
     const allFiles = [];
 
-    for (const link of subjectLinks) {
+    for (let i = 0; i < subjectLinks.length; i++) {
+        const link = subjectLinks[i];
         try {
+            chrome.runtime.sendMessage({
+                action: 'scanProgress',
+                current: i + 1,
+                total: subjectLinks.length,
+                subject: link.subject,
+            }).catch(() => {});
+
             const response = await fetch(link.url);
             const text = await response.text();
             const doc = parser.parseFromString(text, 'text/html');

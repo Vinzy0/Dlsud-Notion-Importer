@@ -113,20 +113,31 @@ export function showToast(message, type = 'info', duration = 3000) {
 }
 
 /**
- * Renders placeholder skeleton rows while real data loads.
+ * Renders a loading state with a status message and progress bar.
  * @param {HTMLElement} container
- * @param {number} [count=5]
+ * @param {string} [message='Starting...']
  */
-export function renderSkeletons(container, count = 5) {
-    container.innerHTML = Array.from({ length: count }, (_, i) =>
-        `<div class="skeleton-row" style="animation-delay:${i * 60}ms; margin-bottom: 2px;">
-            <div class="skeleton-block skeleton-checkbox"></div>
-            <div style="flex:1">
-                <div class="skeleton-block skeleton-line-long"></div>
-                <div class="skeleton-block skeleton-line-short"></div>
+export function renderLoadingState(container, message = 'Starting...') {
+    container.innerHTML = `
+        <div class="loading-state" id="loading-state">
+            <p class="loading-message" id="loading-message">${message}</p>
+            <div class="loading-bar-track">
+                <div class="loading-bar-fill" id="loading-bar" style="width:0%"></div>
             </div>
-        </div>`
-    ).join('');
+        </div>`;
+}
+
+/**
+ * Updates the loading state message and progress bar fill.
+ * @param {string} message
+ * @param {number} current
+ * @param {number} total
+ */
+export function updateLoadingProgress(message, current, total) {
+    const msgEl = document.getElementById('loading-message');
+    const barEl = document.getElementById('loading-bar');
+    if (msgEl) msgEl.textContent = message;
+    if (barEl && total > 0) barEl.style.width = `${Math.round((current / total) * 100)}%`;
 }
 
 // ============================================================

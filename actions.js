@@ -8,7 +8,7 @@
 
 import { State } from './state.js';
 import {
-    els, getEl, showToast, renderSkeletons, renderTasks, renderFiles,
+    els, getEl, showToast, renderLoadingState, updateLoadingProgress, renderTasks, renderFiles,
     attachCheckboxListeners, updateActionBar, switchTab,
     openSettings, closeSettings, updateNotionSettingsVisibility,
     updateExportDropdown, toggleDarkMode, showFileWarningIfNeeded,
@@ -77,7 +77,7 @@ async function doFetch() {
 
     els.statusMessage.classList.add('hidden');
     els.lists['tasks'].classList.remove('hidden');
-    renderSkeletons(els.lists['tasks'], 5);
+    renderLoadingState(els.lists['tasks'], 'Looking for subjects...');
 
     State.tasks = [];
     State.files = [];
@@ -128,11 +128,24 @@ async function doFetch() {
         }
 
         showToast(`Found ${subjectLinks.length} subjects. Scanning...`, 'info', 2000);
+        updateLoadingProgress(`Found ${subjectLinks.length} subjects`, 0, subjectLinks.length);
+
+        // Listen for per-subject progress updates from the background scan.
+        const onScanProgress = (request) => {
+            if (request.action !== 'scanProgress') return;
+            updateLoadingProgress(
+                `Fetching ${request.subject} (${request.current} of ${request.total})`,
+                request.current,
+                request.total
+            );
+        };
+        chrome.runtime.onMessage.addListener(onScanProgress);
 
         // Listen for the background scan to write its results to storage.
         const onScanComplete = (changes, area) => {
             if (area !== 'local' || !changes.lastScrape) return;
             chrome.storage.onChanged.removeListener(onScanComplete);
+            chrome.runtime.onMessage.removeListener(onScanProgress);
 
             const cache = changes.lastScrape.newValue;
             if (!cache || !cache.tasks || cache.tasks.length === 0) {
@@ -180,7 +193,7 @@ async function doFetchFilesOnly() {
 
     els.statusMessage.classList.add('hidden');
     els.lists['files'].classList.remove('hidden');
-    renderSkeletons(els.lists['files'], 4);
+    renderLoadingState(els.lists['files'], 'Checking page...');
 
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -676,37 +689,16 @@ els.scanModulesBtn.addEventListener('click', async () => {
 
     const targetLinks = selectedIndices.map(i => State.pendingModuleLinks[i]);
 
-    // Show progress strip above skeletons
     els.statusMessage.classList.add('hidden');
     els.lists['files'].classList.remove('hidden');
-    renderSkeletons(els.lists['files'], 4);
-
-    const statusBar = document.createElement('div');
-    statusBar.id = 'scan-status';
-    statusBar.className = 'scan-status';
-
-    const statusText = document.createElement('span');
-    statusText.id = 'scan-status-text';
-    statusText.textContent = 'Starting scan…';
-
-    const barWrap = document.createElement('div');
-    barWrap.className = 'scan-bar';
-    const barFill = document.createElement('div');
-    barFill.id = 'scan-bar-fill';
-    barFill.className = 'scan-bar-fill';
-    barWrap.appendChild(barFill);
-
-    statusBar.append(statusText, barWrap);
-    els.lists['files'].insertAdjacentElement('afterbegin', statusBar);
+    renderLoadingState(els.lists['files'], 'Starting scan...');
 
     const allFiles = [];
 
     try {
         for (let i = 0; i < targetLinks.length; i++) {
             const link = targetLinks[i];
-            const pct  = Math.round(((i + 1) / targetLinks.length) * 100);
-            statusText.textContent = `${i + 1} / ${targetLinks.length} — ${link.title}`;
-            barFill.style.width = `${pct}%`;
+            updateLoadingProgress(`Fetching ${link.title} (${i + 1} of ${targetLinks.length})`, i + 1, targetLinks.length);
 
             try {
                 const response = await fetch(link.url);
