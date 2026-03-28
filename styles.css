@@ -877,7 +877,7 @@ body {
 .scan-bar {
     height: 3px;
     background: var(--border-subtle);
-    border-radius: 99px;
+    border-radius: var(--radius-full);
     overflow: hidden;
 }
 
@@ -885,8 +885,8 @@ body {
     height: 100%;
     width: 0%;
     background: var(--accent-gradient);
-    border-radius: 99px;
-    transition: width 0.3s ease;
+    border-radius: var(--radius-full);
+    transition: width var(--duration-base) ease;
 }
 
 .files-divider {
@@ -1054,7 +1054,6 @@ body {
 
 [data-theme="light"] .action-bar {
     background: rgba(255, 255, 255, 0.88);
-    border-top: 1px solid var(--border-default);
 }
 
 .action-bar.visible {
@@ -1711,6 +1710,79 @@ input:checked + .slider::before {
     flex: 1;
     height: 1px;
     background: var(--border-subtle);
+}
+
+/* ============================================================
+   Notion Setup Tutorial
+   ============================================================ */
+
+.tutorial-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    background: none;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 6px 10px;
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+    margin-bottom: var(--space-3);
+    transition: background var(--duration-fast), color var(--duration-fast);
+}
+
+.tutorial-toggle:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.tutorial-toggle .tutorial-chevron {
+    margin-left: auto;
+    transition: transform var(--duration-fast) var(--ease-out-expo);
+}
+
+.tutorial-toggle.open .tutorial-chevron {
+    transform: rotate(180deg);
+}
+
+.tutorial-panel {
+    background: var(--bg-raised);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-3);
+}
+
+.tutorial-steps {
+    margin: 0;
+    padding-left: var(--space-5);
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.tutorial-steps li {
+    margin-bottom: var(--space-2);
+}
+
+.tutorial-steps li:last-child {
+    margin-bottom: 0;
+}
+
+.tutorial-steps code {
+    background: var(--bg-active);
+    border-radius: var(--radius-sm);
+    padding: 1px 4px;
+    font-size: 11px;
+    color: var(--accent-solid);
+}
+
+.tutorial-steps strong {
+    color: var(--text-primary);
+    font-weight: 600;
 }
 
 /* ============================================================

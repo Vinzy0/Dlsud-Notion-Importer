@@ -1,3 +1,6 @@
+importScripts('logger.js');
+importScripts('scraper.js');
+
 /**
  * Listens for messages from the popup to send tasks to Notion or update badge.
  * @param {Object} request - The message request object
@@ -18,13 +21,74 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         return true;
     }
-    
+
     if (request.action === "updateBadge") {
         updateBadge(request.count, request.hasOverdue);
         sendResponse({ success: true });
         return true;
     }
+
+    if (request.action === "doDeepScan") {
+        // Fire-and-forget: popup does not wait for this response.
+        // Results are written to chrome.storage.local when done.
+        runDeepScan(request.subjectLinks);
+        sendResponse({ started: true });
+        return true;
+    }
 });
+
+/**
+ * Fetches and parses every subject page and its task pages for files.
+ * Runs entirely in the background service worker so the popup can be closed
+ * mid-scan without losing progress. Results are persisted to chrome.storage.local.
+ *
+ * @param {Array<{subject: string, url: string}>} subjectLinks
+ */
+async function runDeepScan(subjectLinks) {
+    const parser = new DOMParser();
+    const allTasks = [];
+    const allFiles = [];
+
+    for (const link of subjectLinks) {
+        try {
+            const response = await fetch(link.url);
+            const text = await response.text();
+            const doc = parser.parseFromString(text, 'text/html');
+
+            const tasks = parseSubjectPage(doc, cleanSubject(link.subject), link.url);
+            allTasks.push(...tasks);
+
+            const taskPageResults = await Promise.all(
+                tasks
+                    .filter(task => task.link && task.link !== link.url)
+                    .map(task =>
+                        fetch(task.link)
+                            .then(r => r.text())
+                            .then(html => {
+                                const taskDoc = parser.parseFromString(html, 'text/html');
+                                return findFilesOnPage(taskDoc, task.subject, task.name, task.link);
+                            })
+                            .catch(e => {
+                                Logger.error(`Error scanning task "${task.name}":`, e);
+                                return [];
+                            })
+                    )
+            );
+            taskPageResults.forEach(files => allFiles.push(...files));
+        } catch (err) {
+            Logger.error(`Error fetching subject "${link.subject}":`, err);
+        }
+    }
+
+    const uniqueTasks = [...new Map(allTasks.map(t => [t.id, t])).values()];
+    const cache = {
+        timestamp: Date.now(),
+        tasks: uniqueTasks,
+        files: allFiles
+    };
+
+    await chrome.storage.local.set({ lastScrape: cache });
+}
 
 function updateBadge(count, hasOverdue) {
     if (count > 0) {
@@ -90,14 +154,59 @@ async function validateDatabaseSchema(token, dbId) {
 
         return { valid: missing.length === 0, missing };
     } catch (error) {
-        console.error("Schema validation error:", error);
+        Logger.error("Schema validation error:", error);
         return { valid: false, missing: [], error: "Failed to validate database schema." };
     }
 }
 
 /**
+ * Fetches the names of all existing pages in a Notion database.
+ * Used to prevent pushing duplicate tasks.
+ *
+ * @param {string} token - Notion API bearer token
+ * @param {string} dbId - Target Notion database ID
+ * @returns {Promise<Set<string>>} Lowercase set of existing task names
+ */
+async function fetchExistingTaskNames(token, dbId) {
+    const existing = new Set();
+    let cursor = undefined;
+
+    try {
+        do {
+            const body = { page_size: 100 };
+            if (cursor) body.start_cursor = cursor;
+
+            const response = await fetch(`https://api.notion.com/v1/databases/${dbId}/query`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    'Notion-Version': '2022-06-28',
+                },
+                body: JSON.stringify(body),
+            });
+
+            if (!response.ok) return existing;
+
+            const data = await response.json();
+            for (const page of data.results) {
+                const titleProp = Object.values(page.properties).find(p => p.type === 'title');
+                const name = titleProp?.title?.[0]?.plain_text?.toLowerCase();
+                if (name) existing.add(name);
+            }
+
+            cursor = data.has_more ? data.next_cursor : undefined;
+        } while (cursor);
+    } catch (err) {
+        Logger.error('Could not fetch existing Notion tasks:', err);
+    }
+
+    return existing;
+}
+
+/**
  * Pushes an array of task objects to a Notion database.
- * Creates a new page in Notion for each task with Name, Subject, Due Date, and Link.
+ * Skips tasks that already exist (matched by name) to prevent duplicates.
  * Implements rate limiting to stay within Notion API limits (~3 requests/second).
  *
  * @param {Array<{name: string, subject: string, date: string, link: string}>} tasks - Tasks to upload
@@ -109,22 +218,30 @@ async function pushToNotion(tasks, token, dbId) {
     try {
         // Validate schema first
         const validation = await validateDatabaseSchema(token, dbId);
-        
+
         if (!validation.valid) {
             if (validation.error) {
                 return { success: false, message: validation.error };
             }
             const missingList = validation.missing.join(', ');
-            return { 
-                success: false, 
-                message: `Missing required columns in Notion database: ${missingList}. Please add these columns and try again.` 
+            return {
+                success: false,
+                message: `Missing required columns in Notion database: ${missingList}. Please add these columns and try again.`
             };
+        }
+
+        const existingNames = await fetchExistingTaskNames(token, dbId);
+        const newTasks = tasks.filter(t => !existingNames.has(t.name.toLowerCase()));
+        const skippedCount = tasks.length - newTasks.length;
+
+        if (newTasks.length === 0) {
+            return { success: true, message: `All ${skippedCount} tasks already exist in Notion — nothing to add.` };
         }
 
         let successCount = 0;
         let failCount = 0;
 
-        for (const task of tasks) {
+        for (const task of newTasks) {
             const response = await fetch("https://api.notion.com/v1/pages", {
                 method: "POST",
                 headers: {
@@ -149,7 +266,7 @@ async function pushToNotion(tasks, token, dbId) {
 
             if (!response.ok) {
                 const err = await response.json();
-                console.error("Notion Error:", err);
+                Logger.error("Notion Error:", err);
                 failCount++;
             } else {
                 successCount++;
@@ -159,15 +276,16 @@ async function pushToNotion(tasks, token, dbId) {
             await new Promise(resolve => setTimeout(resolve, 350));
         }
 
+        const skipNote = skippedCount > 0 ? ` (${skippedCount} already existed, skipped)` : '';
         if (failCount === 0) {
-            return { success: true, message: `${successCount} tasks added to Notion.` };
+            return { success: true, message: `${successCount} tasks added to Notion.${skipNote}` };
         } else if (successCount === 0) {
-            return { success: false, message: "All tasks failed. Check Console for details." };
+            return { success: false, message: `All tasks failed to add.${skipNote} Check the console for details.` };
         } else {
-            return { success: true, message: `${successCount} added, ${failCount} failed.` };
+            return { success: true, message: `${successCount} added, ${failCount} failed.${skipNote}` };
         }
     } catch (error) {
-        console.error("Notion API Error:", error);
+        Logger.error("Notion API Error:", error);
         return { success: false, message: "Network Error: Unable to connect to Notion." };
     }
 }

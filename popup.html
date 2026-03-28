@@ -181,6 +181,21 @@
                 </label>
             </div>
             <div id="notionCredentialsSection">
+                <button id="notionTutorialToggle" class="tutorial-toggle" aria-expanded="false">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="8" cy="8" r="6"/><path d="M8 7v4"/><circle cx="8" cy="5" r="0.5" fill="currentColor"/>
+                    </svg>
+                    How to connect Notion
+                    <svg class="tutorial-chevron" width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <div id="notionTutorial" class="tutorial-panel hidden">
+                    <ol class="tutorial-steps">
+                        <li>Go to <strong>notion.so/profile/integrations</strong> → create a new integration → copy the <strong>Internal Integration Secret</strong> (starts with <code>secret_</code> or <code>ntn_</code>)</li>
+                        <li>Create a Notion database with these exact column names: <code>Name</code> (Title), <code>Subject</code> (Text), <code>Due Date</code> (Text), <code>Link</code> (URL)</li>
+                        <li>Open your database → click <strong>···</strong> menu → <strong>Add connections</strong> → select your integration</li>
+                        <li>Copy the database ID from the URL: <code>notion.so/<strong>[32 chars here]</strong>?v=...</code></li>
+                    </ol>
+                </div>
                 <div class="form-group">
                     <label for="apiKey">NOTION TOKEN</label>
                     <input type="password" id="apiKey" placeholder="secret_..." aria-label="Notion API Token">
@@ -236,8 +251,11 @@
         </div>
     </div>
 
+    <!-- Classic scripts first — set Logger and scraper globals used by the modules below -->
+    <script src="logger.js"></script>
     <script src="scraper.js"></script>
-    <script src="popup.js"></script>
+    <!-- ES modules — import/export each other, use globals from classic scripts above -->
+    <script type="module" src="actions.js"></script>
 </body>
 
 </html>

@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(grep -r \"icon\\\\|logo\\\\|image\\\\|svg\\\\|png\" /c/Users/VINZ/Documents/Dlsud-Notion-Importer/*.html /c/Users/VINZ/Documents/Dlsud-Notion-Importer/*.js)"
+      "Bash(grep -r \"icon\\\\|logo\\\\|image\\\\|svg\\\\|png\" /c/Users/VINZ/Documents/Dlsud-Notion-Importer/*.html /c/Users/VINZ/Documents/Dlsud-Notion-Importer/*.js)",
+      "Bash(node tests/unit.test.js)"
     ]
   }
 }

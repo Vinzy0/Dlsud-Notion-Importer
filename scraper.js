@@ -13,6 +13,22 @@ function hashStr(s) {
 }
 
 /**
+ * Strips garbage patterns from raw subject strings scraped from the LMS.
+ * Shared between popup.js and background.js — keep in sync with popup.js copy (none; this IS the source).
+ * @param {string} s
+ * @returns {string}
+ */
+function cleanSubject(s) {
+    if (!s) return s;
+    return s
+        .replace(/^\s*-\s*|\s*-\s*$/g, '')
+        .replace(/\[\d+\]/g, '')
+        .replace(/\[([^\]]+)\]/g, (m, g) => g)
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/**
  * Scrapes the current subject name from the page header.
  * Injected into the page via chrome.scripting.
  * @returns {string}
