@@ -1,106 +1,117 @@
+<div align="center">
+
+<img src="hi (2).png" alt="UDScraper Logo" width="128" height="128" />
+
 # UDScraper
 
-A Chrome extension that automatically pulls your assignments from the **DLSUD LMS** and syncs them to a **Notion database** — so you always know what's due and when.
+**Sync your DLSUD assignments to Notion — in one click.**
 
-> Built for De La Salle University Dasmarinas students.
+[![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-Available-4285F4?style=flat-square&logo=google-chrome&logoColor=white)](https://chrome.google.com/webstore)
+[![Manifest V3](https://img.shields.io/badge/Manifest-V3-green?style=flat-square)](https://developer.chrome.com/docs/extensions/mv3/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
+
+</div>
+
+---
+
+## What is this?
+
+UDScraper is a Chrome extension for **DLSUD students** that pulls your assignments straight from the LMS and sends them to a Notion database — automatically grouped by subject, with due dates, and without any copy-pasting.
+
+No tokens to configure. No spreadsheets to maintain. Just connect your Notion and go.
 
 ---
 
 ## Features
 
-- **Scan assignments** — scrapes all pending tasks from your LMS To-Do widget in one click
-- **Deep scan** — follows each subject page to find every assignment and attached file
-- **Notion sync** — pushes tasks directly to your Notion database (skips duplicates automatically)
-- **Overdue detection** — highlights and counts overdue tasks on the extension badge
-- **File detection** — finds downloadable attachments (PDFs, PPTX, DOCX, etc.) linked to your tasks
-- **Dark mode** — clean UI that works in both light and dark themes
+- 🔐 **One-click Notion login** — OAuth flow, no manual token setup
+- 🗂️ **Auto-creates your database** — a "DLSUD Tasks" database is set up in your Notion on first connect
+- 📚 **Grouped by subject** — tasks are organized under collapsible subject headers by default
+- 📅 **Sort options** — switch between Grouped, Due Date, or Name views
+- ✅ **Send selected or sync all** — push just the tasks you want, or sync everything at once
+- 🔁 **Duplicate detection** — already-synced tasks are never sent twice
+- 📥 **Download tasks** — export your scraped assignments as a local file
+- 🌙 **Dark mode** — easy on the eyes during late-night cramming
 
 ---
 
-## Installation
+## How it works
 
-> UDScraper is not on the Chrome Web Store. Install it manually in a few steps.
+```
+DLSUD LMS  ──scrape──▶  Extension  ──OAuth──▶  Cloudflare Worker  ──token──▶  Notion API
+```
 
-**1. Download the extension**
+1. Open the extension on your DLSUD dashboard
+2. It scrapes your assignments from the page
+3. Hit **Sync All** (or select specific tasks and hit **Send to Notion**)
+4. Tasks land in your Notion database, grouped and dated
 
-Go to the [Releases](https://github.com/Vinzy0/Dlsud-Notion-Importer/releases/latest) page and download `udscraper.zip`.
-
-**2. Unzip it**
-
-Extract the zip to a permanent folder on your computer (don't delete it after — Chrome loads from that folder).
-
-**3. Load in Chrome**
-
-1. Open Chrome and go to `chrome://extensions`
-2. Enable **Developer mode** (toggle in the top-right corner)
-3. Click **Load unpacked**
-4. Select the folder you just extracted
-
-The UDScraper icon will appear in your extensions bar.
+Your Notion token is exchanged through a Cloudflare Worker — your credentials never touch a third-party server or get stored anywhere except your own device.
 
 ---
 
-## Setup
+## Getting started
 
-### 1. Create a Notion Integration
+### Install from the Chrome Web Store
 
-1. Go to [notion.so/my-integrations](https://www.notion.so/my-integrations)
-2. Click **New integration**, give it a name (e.g. "UDScraper"), and hit **Submit**
-3. Copy the **Internal Integration Secret** (starts with `ntn_` or `secret_`)
+> [**Add to Chrome →**](https://chrome.google.com/webstore)
 
-### 2. Create a Notion Database
+### Or load it manually (dev mode)
 
-Create a new Notion database with these exact column names and types:
+1. Clone this repo
+   ```bash
+   git clone https://github.com/Vinzy0/Dlsud-Notion-Importer.git
+   ```
+2. Go to `chrome://extensions` → enable **Developer mode**
+3. Click **Load unpacked** → select the project folder
+4. Open the extension on your DLSUD LMS page and connect Notion
 
-| Column | Type |
+---
+
+## Project structure
+
+```
+├── manifest.json       # Extension config (MV3)
+├── popup.html          # Main UI
+├── actions.js          # Event handlers & business logic
+├── ui.js               # DOM rendering
+├── state.js            # App state & constants
+├── notion.js           # Notion API integration
+├── background.js       # Service worker (OAuth flow)
+├── scraper.js          # LMS scraping logic
+├── logger.js           # Dev logging utility
+├── offscreen.js/.html  # Offscreen DOM parser
+├── worker.js           # Cloudflare Worker (OAuth relay, deployed separately)
+├── styles.css          # All styles
+└── icons/              # Extension icons
+```
+
+---
+
+## Tech stack
+
+| Layer | Tech |
 |---|---|
-| Name | Title |
-| Subject | Text |
-| Due Date | Text |
-| Link | URL |
-
-### 3. Connect the integration to your database
-
-1. Open the database in Notion
-2. Click `•••` (top right) → **Connections** → find your integration and connect it
-
-### 4. Get the Database ID
-
-Open your database as a full page. The URL will look like:
-```
-https://www.notion.so/yourworkspace/YOUR-DATABASE-ID?v=...
-```
-Copy the 32-character ID between the last `/` and the `?`.
-
-### 5. Configure the extension
-
-1. Click the UDScraper icon in Chrome
-2. Open **Settings** (⋮ icon)
-3. Paste your **Notion Token** and **Database ID**
-4. Save
+| Extension | Chrome MV3, Vanilla JS (ES Modules) |
+| Auth relay | Cloudflare Workers |
+| Database | Notion API |
+| Storage | `chrome.storage.local` |
 
 ---
 
-## Usage
+## Privacy
 
-1. Log in to the [DLSUD LMS](https://dlsud.edu20.org)
-2. Click the UDScraper icon
-3. Hit **Scan** — your tasks will load from the current page
-4. Hit **Deep Scan** to fetch all subject pages and find attachments (takes a moment)
-5. Select the tasks you want and click **Send to Notion**
+All data stays on your device. The only outbound requests are:
 
-The badge on the extension icon shows your pending task count (red = overdue).
+- **Notion API** (`api.notion.com`) — to create your task pages
+- **Cloudflare Worker** — to securely exchange your OAuth code for a token (no logging, no storage)
 
----
-
-## Requirements
-
-- Google Chrome (version 109 or later)
-- A DLSUD student account
-- A Notion account with an integration set up
+No data is ever sold or shared. See the full [privacy policy](privacy-policy.md).
 
 ---
 
-## License
+## Contributing
 
-MIT
+Pull requests are welcome. For major changes, open an issue first.
+
+---
