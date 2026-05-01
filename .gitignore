@@ -1,2 +1,18 @@
+# Secrets
 secret.md
+
+# Build output
+udscraper.zip
+*.zip
+
+# Source images (icons are generated into icons/)
+2d8c6220a56d59f4c674848da9e30f81.jpg
+hi (2).png
+
+# Dev/internal docs
 ARCHITECTURE.md
+
+# Node / OS
+node_modules/
+.DS_Store
+Thumbs.db

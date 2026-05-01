@@ -51,18 +51,18 @@ export const els = {
     closeActionsBtn:          getEl('closeActionsBtn'),
     exportBtn:                getEl('exportBtn'),
     exportSelect:             getEl('exportSelect'),
-    progressFill:             getEl('progress-fill'),
     toastContainer:           getEl('toast-container'),
 
     // Settings
-    saveKeysBtn:              getEl('saveKeysBtn'),
     clearDataBtn:             getEl('clearDataBtn'),
-    apiKey:                   getEl('apiKey'),
-    dbId:                     getEl('dbId'),
-    settingsStatus:           getEl('settings-status'),
     darkMode:                 getEl('darkMode'),
-    notionSyncToggle:         getEl('notionSyncToggle'),
-    notionCredentialsSection: getEl('notionCredentialsSection'),
+    connectNotionBtn:         getEl('connectNotionBtn'),
+    disconnectNotionBtn:      getEl('disconnectNotionBtn'),
+    notionDisconnected:       getEl('notion-disconnected'),
+    notionConnectedEl:        getEl('notion-connected'),
+    notionWorkspaceName:      getEl('notion-workspace-name'),
+    sendToNotionBtn:          getEl('sendToNotionBtn'),
+    notionDbLink:             getEl('notionDbLink'),
 
     // Task Controls
     taskControls:             getEl('task-controls'),
@@ -119,11 +119,12 @@ export function showToast(message, type = 'info', duration = 3000) {
  */
 export function renderLoadingState(container, message = 'Starting...') {
     container.innerHTML = `
-        <div class="loading-state" id="loading-state">
+        <div class="loading-state">
             <p class="loading-message" id="loading-message">${message}</p>
             <div class="loading-bar-track">
                 <div class="loading-bar-fill" id="loading-bar" style="width:0%"></div>
             </div>
+            <p class="loading-hint">Stay on this tab while scanning</p>
         </div>`;
 }
 
@@ -357,7 +358,7 @@ function buildListToolbar(taskCount, refreshBtnId) {
     const header = document.createElement('div');
     header.className = 'list-top-header';
 
-    const cbWrap = document.createElement('div');
+    const cbWrap = document.createElement('label'); // label so clicking anywhere toggles the input
     cbWrap.className = 'checkbox-wrapper select-all-wrapper';
     const selectAll = document.createElement('input');
     selectAll.type = 'checkbox';
@@ -370,18 +371,78 @@ function buildListToolbar(taskCount, refreshBtnId) {
     const countSpan = document.createElement('span');
     countSpan.textContent = `${taskCount} task${taskCount !== 1 ? 's' : ''}`;
 
+    const btnGroup = document.createElement('div');
+    btnGroup.className = 'toolbar-btn-group';
+
+    if (State.notionConnected && refreshBtnId === 'refreshTasksBtn') {
+        const syncBtn = document.createElement('button');
+        syncBtn.className = 'secondary-btn small notion-sync-btn';
+        syncBtn.id = 'syncAllToNotionBtn';
+        syncBtn.textContent = 'Sync All';
+        btnGroup.appendChild(syncBtn);
+    }
+
     const refreshBtn = document.createElement('button');
     refreshBtn.className = 'secondary-btn small list-refresh-btn';
     refreshBtn.id = refreshBtnId;
     refreshBtn.innerHTML = REFRESH_ICON + ' Refresh'; // trusted constant + literal text
+    btnGroup.appendChild(refreshBtn);
 
-    header.append(cbWrap, countSpan, refreshBtn);
+    header.append(cbWrap, countSpan, btnGroup);
 
     const divider = document.createElement('hr');
     divider.className = 'files-divider';
 
     frag.append(header, divider);
     return frag;
+}
+
+/**
+ * Builds a subject group header row for the grouped view.
+ * @param {string} subject
+ * @param {number} count
+ * @returns {HTMLDivElement}
+ */
+function buildSubjectHeader(subject, count) {
+    const color = getSubjectColor(subject);
+    const isCollapsed = State.collapsedSubjects.has(subject);
+
+    const el = document.createElement('div');
+    el.className = `subject-group-header${isCollapsed ? ' collapsed' : ''}`;
+    el.dataset.subject = subject;
+
+    const left = document.createElement('div');
+    left.className = 'subject-group-left';
+
+    const chevron = document.createElement('span');
+    chevron.className = 'subject-group-chevron';
+    chevron.innerHTML = '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5L5 6.5L7.5 3.5"/></svg>';
+
+    const pill = document.createElement('span');
+    pill.className = 'subject-pill';
+    pill.style.background = color.bg;
+    pill.style.color = color.text;
+    pill.style.border = `1px solid ${color.border}`;
+    pill.textContent = subject; // XSS-safe
+
+    left.append(chevron, pill);
+
+    const countEl = document.createElement('span');
+    countEl.className = 'subject-group-count';
+    countEl.textContent = `${count} task${count !== 1 ? 's' : ''}`;
+
+    el.append(left, countEl);
+
+    el.addEventListener('click', () => {
+        const nowCollapsed = !State.collapsedSubjects.has(subject);
+        if (nowCollapsed) State.collapsedSubjects.add(subject);
+        else              State.collapsedSubjects.delete(subject);
+        el.classList.toggle('collapsed', nowCollapsed);
+        const body = el.nextElementSibling;
+        if (body?.classList.contains('task-group-body')) body.classList.toggle('hidden', nowCollapsed);
+    });
+
+    return el;
 }
 
 // ============================================================
@@ -407,30 +468,64 @@ export function renderTasks() {
         return matchesSearch && matchesSubject;
     });
 
-    const activeTasks    = sortTaskList(filtered.filter(t => !State.completedTaskIds.has(t.id)));
-    const completedTasks = sortTaskList(filtered.filter(t =>  State.completedTaskIds.has(t.id)));
+    const activeFiltered    = filtered.filter(t => !State.completedTaskIds.has(t.id));
+    const completedFiltered = filtered.filter(t =>  State.completedTaskIds.has(t.id));
+
+    // Due soon always sorts by date regardless of view
+    const byDate = (a, b) => {
+        const da = parseDate(a.date), db = parseDate(b.date);
+        if (!da && !db) return 0;
+        if (!da) return 1;
+        if (!db) return -1;
+        return da - db;
+    };
 
     let dueSoonCount = 0;
-
-    activeTasks.forEach((task, index) => {
-        const row = buildTaskRow(task, index, false);
-        els.lists['tasks'].appendChild(row);
-
+    [...activeFiltered].sort(byDate).forEach((task, index) => {
         const d = parseDate(task.date);
         if (d) {
             const now = new Date(); now.setHours(0, 0, 0, 0);
             const target = new Date(d); target.setHours(0, 0, 0, 0);
-            const diffDays = Math.ceil((target - now) / (1000 * 60 * 60 * 24));
-            if (diffDays <= 3) {
+            if (Math.ceil((target - now) / (1000 * 60 * 60 * 24)) <= 3) {
                 els.lists['due-soon'].appendChild(buildTaskRow(task, dueSoonCount, false));
                 dueSoonCount++;
             }
         }
     });
 
-    completedTasks.forEach((task, index) => {
-        els.lists['tasks'].appendChild(buildTaskRow(task, index, true));
-    });
+    // Tasks list — grouped or flat
+    if (State.sortBy === 'grouped') {
+        const groups = {};
+        activeFiltered.forEach(t => { (groups[t.subject] = groups[t.subject] || []).push(t); });
+
+        const sortedGroups = Object.entries(groups).sort(([, a], [, b]) => {
+            const earliest = tasks => {
+                const dates = tasks.map(t => parseDate(t.date)).filter(Boolean);
+                return dates.length ? Math.min(...dates.map(d => d.getTime())) : Infinity;
+            };
+            return earliest(a) - earliest(b);
+        });
+
+        sortedGroups.forEach(([subject, tasks]) => {
+            els.lists['tasks'].appendChild(buildSubjectHeader(subject, tasks.length));
+
+            const body = document.createElement('div');
+            body.className = 'task-group-body';
+            body.dataset.subject = subject;
+            if (State.collapsedSubjects.has(subject)) body.classList.add('hidden');
+
+            [...tasks].sort(byDate).forEach((task, i) => body.appendChild(buildTaskRow(task, i, false)));
+            els.lists['tasks'].appendChild(body);
+        });
+    } else {
+        sortTaskList(activeFiltered).forEach((task, index) =>
+            els.lists['tasks'].appendChild(buildTaskRow(task, index, false))
+        );
+    }
+
+    sortTaskList(completedFiltered).forEach((task, index) =>
+        els.lists['tasks'].appendChild(buildTaskRow(task, index, true))
+    );
 
     if (dueSoonCount > 0) {
         els.dueBadge.textContent = dueSoonCount;
@@ -728,8 +823,27 @@ export function updateActionBar() {
     if (State.selectedIds.size > 0) {
         els.actionBar.classList.add('visible');
         els.selectedCount.textContent = `${State.selectedIds.size} selected`;
+        const showNotion = State.notionConnected && State.activeTab !== 'files';
+        els.sendToNotionBtn.classList.toggle('hidden', !showNotion);
     } else {
         els.actionBar.classList.remove('visible');
+    }
+}
+
+/**
+ * Updates the settings panel Notion section to reflect connection state.
+ * @param {boolean} connected
+ * @param {string} [workspaceName]
+ */
+export function renderNotionSettings(connected, workspaceName = '', dbUrl = '') {
+    if (connected) {
+        els.notionDisconnected.classList.add('hidden');
+        els.notionConnectedEl.classList.remove('hidden');
+        if (workspaceName) els.notionWorkspaceName.textContent = workspaceName;
+        if (els.notionDbLink && dbUrl) els.notionDbLink.href = dbUrl;
+    } else {
+        els.notionDisconnected.classList.remove('hidden');
+        els.notionConnectedEl.classList.add('hidden');
     }
 }
 
@@ -760,9 +874,18 @@ export function switchTab(tabId) {
     }
 
     const hasData = tabId === 'files' ? State.files.length > 0 : State.tasks.length > 0;
+    const isFetchingNow = !!document.body.dataset.fetching;
 
     if (hasData) {
         els.statusMessage.classList.add('hidden');
+    } else if (isFetchingNow && tabId !== 'files') {
+        // Fetch is running in background — let the user know instead of showing a broken empty state
+        els.statusMessage.classList.remove('hidden');
+        els.fetchInitialBtn.classList.add('hidden');
+        els.fetchFilesInitialBtn.classList.add('hidden');
+        els.fileWarning.classList.add('hidden');
+        els.emptyTitle.textContent = 'Still fetching your tasks…';
+        els.statusText.textContent = "It's working, just hang tight.";
     } else {
         els.statusMessage.classList.remove('hidden');
         if (tabId === 'files') {
@@ -776,7 +899,7 @@ export function switchTab(tabId) {
             els.fetchFilesInitialBtn.classList.add('hidden');
             els.fileWarning.classList.add('hidden');
             els.emptyTitle.textContent = 'No tasks yet';
-            els.statusText.textContent = 'Open your dashboard and fetch your assignments';
+            els.statusText.textContent = 'Scrapes tasks and files from the LMS. Open your dashboard, then hit the button below.';
         }
     }
 
@@ -835,24 +958,8 @@ export async function showFileWarningIfNeeded() {
 // Settings Panel
 // ============================================================
 
-/** Shows or hides the Notion credentials section based on sync toggle. */
-export function updateNotionSettingsVisibility() {
-    if (State.notionSyncEnabled) els.notionCredentialsSection.classList.remove('hidden');
-    else els.notionCredentialsSection.classList.add('hidden');
-}
-
-/** Hides the Notion export option in the dropdown when sync is off. */
-export function updateExportDropdown() {
-    const notionOption = els.exportSelect.querySelector('option[value="notion"]');
-    if (notionOption) notionOption.style.display = State.notionSyncEnabled ? '' : 'none';
-    if (!State.notionSyncEnabled && els.exportSelect.value === 'notion') {
-        els.exportSelect.value = 'text';
-    }
-}
-
 /** Opens the settings panel. */
 export function openSettings() {
-    updateNotionSettingsVisibility();
     els.settingsPanel.classList.add('open');
     els.settingsBackdrop.classList.add('visible');
 }

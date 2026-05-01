@@ -10,11 +10,12 @@ import { State } from './state.js';
 import {
     els, getEl, showToast, renderLoadingState, updateLoadingProgress, renderTasks, renderFiles,
     attachCheckboxListeners, updateActionBar, switchTab,
-    openSettings, closeSettings, updateNotionSettingsVisibility,
-    updateExportDropdown, toggleDarkMode, showFileWarningIfNeeded,
+    openSettings, closeSettings,
+    toggleDarkMode, showFileWarningIfNeeded,
     parseDate, updateBadge, applyTheme, isOnSubjectPage,
-    updateSubjectFilterOptions,
+    updateSubjectFilterOptions, renderNotionSettings,
 } from './ui.js';
+import { sendTasks } from './notion.js';
 
 // ============================================================
 // Script Injection Helpers
@@ -65,6 +66,13 @@ function showScriptError(errorKey, listId) {
 
 let isFetching = false;
 
+/** Sets isFetching and mirrors it onto body so ui.js can read it without a direct import. */
+function setFetching(val) {
+    isFetching = val;
+    if (val) document.body.dataset.fetching = '1';
+    else delete document.body.dataset.fetching;
+}
+
 /**
  * Reads the DLSU-D To-Do widget from the active tab, then hands off
  * the full fetch/parse loop to the background service worker.
@@ -73,7 +81,7 @@ let isFetching = false;
  */
 async function doFetch() {
     if (isFetching) return;
-    isFetching = true;
+    setFetching(true);
 
     els.statusMessage.classList.add('hidden');
     els.lists['tasks'].classList.remove('hidden');
@@ -93,7 +101,7 @@ async function doFetch() {
             els.emptyTitle.textContent = 'Wrong page';
             els.statusText.textContent = 'Please go to your dashboard first.';
             els.fetchInitialBtn.classList.remove('hidden');
-            isFetching = false;
+            setFetching(false);
             return;
         }
 
@@ -101,7 +109,7 @@ async function doFetch() {
         if (!results) {
             showScriptError('widget scrape', 'tasks');
             els.fetchInitialBtn.classList.remove('hidden');
-            isFetching = false;
+            setFetching(false);
             return;
         }
 
@@ -111,7 +119,7 @@ async function doFetch() {
             els.emptyTitle.textContent = 'No widget found';
             els.statusText.textContent = 'No To-Do widget found on this page.';
             els.fetchInitialBtn.classList.remove('hidden');
-            isFetching = false;
+            setFetching(false);
             return;
         }
 
@@ -123,7 +131,7 @@ async function doFetch() {
             els.emptyTitle.textContent = 'All caught up';
             els.statusText.textContent = 'To-Do widget empty. No tasks found.';
             els.fetchInitialBtn.classList.remove('hidden');
-            isFetching = false;
+            setFetching(false);
             return;
         }
 
@@ -160,7 +168,7 @@ async function doFetch() {
                 const fileNote = cache.files?.length > 0 ? ` and ${cache.files.length} files` : '';
                 showToast(`Found ${cache.tasks.length} tasks${fileNote}`, 'success');
             }
-            isFetching = false;
+            setFetching(false);
         };
         chrome.storage.onChanged.addListener(onScanComplete);
 
@@ -174,7 +182,7 @@ async function doFetch() {
         els.statusText.textContent = 'Error scanning. Check your connection.';
         els.fetchInitialBtn.classList.remove('hidden');
         showToast('Scan failed', 'error');
-        isFetching = false;
+        setFetching(false);
     }
 }
 
@@ -189,7 +197,7 @@ async function doFetch() {
  */
 async function doFetchFilesOnly() {
     if (isFetching) return;
-    isFetching = true;
+    setFetching(true);
 
     els.statusMessage.classList.add('hidden');
     els.lists['files'].classList.remove('hidden');
@@ -203,7 +211,7 @@ async function doFetchFilesOnly() {
             els.statusMessage.classList.remove('hidden');
             els.emptyTitle.textContent = 'Wrong page';
             els.statusText.textContent = 'File fetching only works on subject pages. Navigate to a subject\'s module page and try again.';
-            isFetching = false;
+            setFetching(false);
             return;
         }
 
@@ -214,7 +222,7 @@ async function doFetchFilesOnly() {
             els.fetchFilesInitialBtn.classList.add('hidden');
             els.emptyTitle.textContent = 'No files yet';
             els.statusText.textContent = 'Navigate to a subject page and fetch files';
-            isFetching = false;
+            setFetching(false);
             return;
         }
 
@@ -269,12 +277,13 @@ async function doFetchFilesOnly() {
             });
 
             els.moduleSelectorModal.classList.add('visible');
+            State._modalFocusTrapCleanup = trapFocus(els.moduleSelectorModal.querySelector('.modal-content'));
             if (State.files.length > 0) renderFiles();
             else {
                 els.lists['files'].classList.add('hidden');
                 els.statusMessage.classList.remove('hidden');
             }
-            isFetching = false;
+            setFetching(false);
             return;
         }
 
@@ -313,7 +322,7 @@ async function doFetchFilesOnly() {
         resetFileFetchButtons();
         showToast('File scan failed', 'error');
     } finally {
-        isFetching = false;
+        setFetching(false);
     }
 }
 
@@ -347,15 +356,10 @@ function saveAndRenderFiles() {
  */
 export function loadCache() {
     chrome.storage.local.get(
-        ['lastScrape', 'notionToken', 'notionDbId', 'dismissedFileWarning',
-         'completedTaskIds', 'notionSyncEnabled', 'darkMode'],
+        ['lastScrape', 'dismissedFileWarning', 'completedTaskIds', 'darkMode',
+         'notionToken', 'notionDatabaseId', 'notionWorkspaceName', 'notionDatabaseUrl'],
         (items) => {
-            if (items.notionToken) els.apiKey.value = items.notionToken;
-            if (items.notionDbId)  els.dbId.value   = items.notionDbId;
             State.dismissedFileWarning = items.dismissedFileWarning || false;
-            State.notionSyncEnabled    = items.notionSyncEnabled    || false;
-            els.notionSyncToggle.checked = State.notionSyncEnabled;
-            updateExportDropdown();
 
             if (items.completedTaskIds && Array.isArray(items.completedTaskIds)) {
                 State.completedTaskIds = new Set(items.completedTaskIds);
@@ -365,6 +369,16 @@ export function loadCache() {
                 State.darkMode = items.darkMode;
                 applyTheme(State.darkMode);
                 els.darkMode.checked = true;
+            }
+
+            if (items.notionToken && items.notionDatabaseId) {
+                State.notionConnected = true;
+                renderNotionSettings(true, items.notionWorkspaceName || 'Notion', items.notionDatabaseUrl || '');
+            }
+
+            if (items.notionConnectError) {
+                showToast(items.notionConnectError, 'error', 6000);
+                chrome.storage.local.remove('notionConnectError');
             }
 
             const cache = items.lastScrape;
@@ -401,13 +415,13 @@ export function loadCache() {
                 els.statusMessage.classList.remove('hidden');
                 els.taskControls.classList.add('hidden');
                 els.emptyTitle.textContent = 'No tasks yet';
-                els.statusText.textContent = 'Open your dashboard and fetch your assignments';
+                els.statusText.textContent = 'Scrapes tasks and files from the LMS. Open your dashboard, then hit the button below.';
                 showFileWarningIfNeeded();
             } else {
                 els.statusMessage.classList.remove('hidden');
                 els.taskControls.classList.add('hidden');
-                els.emptyTitle.textContent = 'Welcome to UDScraper';
-                els.statusText.textContent = 'Open your dashboard and fetch your assignments';
+                els.emptyTitle.textContent = 'Fetch your DLSUD assignments';
+                els.statusText.textContent = 'Scrapes tasks and files from the LMS. Open your dashboard, then hit the button below.';
                 showFileWarningIfNeeded();
             }
         }
@@ -418,11 +432,84 @@ export function loadCache() {
 // Dropdown Toggle Helper
 // ============================================================
 
-/** Toggles one dropdown open while closing all others. */
+/** Toggles one dropdown open while closing all others. Updates aria-expanded on the trigger. */
 function toggleDropdown(dropdown) {
     const isHidden = dropdown.classList.contains('hidden');
     document.querySelectorAll('.custom-select-dropdown').forEach(d => d.classList.add('hidden'));
-    if (isHidden) dropdown.classList.remove('hidden');
+    document.querySelectorAll('.custom-select-btn').forEach(btn => btn.setAttribute('aria-expanded', 'false'));
+    if (isHidden) {
+        dropdown.classList.remove('hidden');
+        const trigger = dropdown.previousElementSibling;
+        if (trigger) trigger.setAttribute('aria-expanded', 'true');
+    }
+}
+
+/** Traps focus within a container element. Returns a cleanup function to remove the trap. */
+function trapFocus(container) {
+    const focusable = container.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    const first = focusable[0];
+    const last  = focusable[focusable.length - 1];
+
+    function onKeyDown(e) {
+        if (e.key !== 'Tab') return;
+        if (e.shiftKey) {
+            if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+        } else {
+            if (document.activeElement === last)  { e.preventDefault(); first.focus(); }
+        }
+    }
+    container.addEventListener('keydown', onKeyDown);
+    if (first) first.focus();
+    return () => container.removeEventListener('keydown', onKeyDown);
+}
+
+// ============================================================
+// Custom Confirm Dialog (replaces native confirm which closes popups)
+// ============================================================
+
+let _confirmCleanup = null;
+
+/**
+ * Shows a custom confirm dialog inside the popup.
+ * Returns a Promise that resolves to true (OK) or false (Cancel).
+ * @param {string} title
+ * @param {string} message
+ * @returns {Promise<boolean>}
+ */
+function showConfirm(title, message) {
+    return new Promise((resolve) => {
+        const dialog   = getEl('confirmDialog');
+        const titleEl  = getEl('confirmTitle');
+        const descEl   = getEl('confirmDesc');
+        const okBtn    = getEl('confirmOkBtn');
+        const cancelBtn = getEl('confirmCancelBtn');
+
+        titleEl.textContent = title;
+        descEl.textContent  = message;
+        dialog.classList.add('visible');
+        _confirmCleanup = trapFocus(dialog.querySelector('.confirm-modal'));
+
+        function cleanup(result) {
+            dialog.classList.remove('visible');
+            if (_confirmCleanup) { _confirmCleanup(); _confirmCleanup = null; }
+            okBtn.removeEventListener('click', onOk);
+            cancelBtn.removeEventListener('click', onCancel);
+            dialog.querySelector('.modal-overlay').removeEventListener('click', onCancel);
+            document.removeEventListener('keydown', onKey);
+            resolve(result);
+        }
+
+        function onOk()      { cleanup(true); }
+        function onCancel()  { cleanup(false); }
+        function onKey(e)    { if (e.key === 'Escape') cleanup(false); }
+
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
+        dialog.querySelector('.modal-overlay').addEventListener('click', onCancel);
+        document.addEventListener('keydown', onKey);
+    });
 }
 
 // ============================================================
@@ -439,27 +526,9 @@ els.settingsBtn.addEventListener('click', openSettings);
 els.closeSettingsBtn.addEventListener('click', closeSettings);
 els.settingsBackdrop.addEventListener('click', closeSettings);
 
-getEl('notionTutorialToggle').addEventListener('click', () => {
-    const panel   = getEl('notionTutorial');
-    const toggle  = getEl('notionTutorialToggle');
-    const isOpen  = !panel.classList.contains('hidden');
-    panel.classList.toggle('hidden', isOpen);
-    toggle.setAttribute('aria-expanded', String(!isOpen));
-    toggle.classList.toggle('open', !isOpen);
-});
-
-els.saveKeysBtn.addEventListener('click', () => {
-    const token = els.apiKey.value.trim();
-    const dbId  = els.dbId.value.trim();
-    if (!token || !dbId) { showToast('Please fill in both fields', 'error'); return; }
-    chrome.storage.local.set({ notionToken: token, notionDbId: dbId }, () => {
-        showToast('Credentials saved', 'success');
-        els.settingsStatus.textContent = '';
-    });
-});
-
-els.clearDataBtn.addEventListener('click', () => {
-    if (!confirm('This will clear all cached tasks, files, and credentials. Continue?')) return;
+els.clearDataBtn.addEventListener('click', async () => {
+    const confirmed = await showConfirm('Clear All Data?', 'This will clear all cached tasks, files, and credentials.');
+    if (!confirmed) return;
     chrome.storage.local.clear(() => {
         State.tasks = [];
         State.files = [];
@@ -468,11 +537,6 @@ els.clearDataBtn.addEventListener('click', () => {
         State.searchQuery   = '';
         State.subjectFilter = '';
         State.sortBy        = 'dueDate';
-        State.notionSyncEnabled = false;
-        els.apiKey.value                = '';
-        els.dbId.value                  = '';
-        els.notionSyncToggle.checked    = false;
-        updateExportDropdown();
         els.lists['tasks'].innerHTML    = '';
         els.lists['due-soon'].innerHTML = '';
         els.lists['files'].innerHTML    = '';
@@ -480,11 +544,13 @@ els.clearDataBtn.addEventListener('click', () => {
         els.taskControls.classList.add('hidden');
         els.taskSearch.value            = '';
         els.subjectFilterLabel.textContent = 'All Subjects';
-        els.sortSelectLabel.textContent    = 'Due Date';
+        els.sortSelectLabel.textContent    = 'Grouped';
         els.statusMessage.classList.remove('hidden');
-        els.emptyTitle.textContent = 'Welcome to UDScraper';
-        els.statusText.textContent = 'Open your dashboard and fetch your assignments';
+        els.emptyTitle.textContent = 'Fetch your DLSUD assignments';
+        els.statusText.textContent = 'Scrapes tasks and files from the LMS. Open your dashboard, then hit the button below.';
         els.fetchInitialBtn.classList.remove('hidden');
+        State.notionConnected = false;
+        renderNotionSettings(false);
         updateActionBar();
         closeSettings();
         showToast('All data cleared', 'info');
@@ -493,15 +559,6 @@ els.clearDataBtn.addEventListener('click', () => {
 });
 
 els.darkMode.addEventListener('change', (e) => toggleDarkMode(e.target.checked));
-
-els.notionSyncToggle.addEventListener('change', (e) => {
-    State.notionSyncEnabled = e.target.checked;
-    chrome.storage.local.set({ notionSyncEnabled: e.target.checked });
-    updateNotionSettingsVisibility();
-    updateExportDropdown();
-    showToast(State.notionSyncEnabled ? 'Notion sync enabled' : 'Notion sync disabled',
-              State.notionSyncEnabled ? 'success' : 'info');
-});
 
 // — Action Bar —
 els.closeActionsBtn.addEventListener('click', () => {
@@ -520,49 +577,7 @@ els.exportBtn.addEventListener('click', async () => {
 
     if (selectedTasks.length === 0) { showToast('No tasks selected', 'error'); return; }
 
-    if (format === 'notion') {
-        const items = await new Promise(r => chrome.storage.local.get(['notionToken', 'notionDbId'], r));
-        if (!items.notionToken || !items.notionDbId) {
-            showToast('Set Notion credentials in Settings first', 'error');
-            return;
-        }
-
-        els.exportBtn.disabled    = true;
-        els.exportBtn.textContent = 'Sending...';
-        els.progressFill.style.width = '0%';
-
-        try {
-            const response = await new Promise((resolve, reject) => {
-                chrome.runtime.sendMessage({
-                    action: 'sendToNotion',
-                    tasks:  selectedTasks,
-                    token:  items.notionToken,
-                    dbId:   items.notionDbId,
-                }, (resp) => {
-                    if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
-                    else resolve(resp);
-                });
-            });
-
-            els.progressFill.style.width = '100%';
-            if (response?.success) {
-                showToast(`${selectedTasks.length} tasks sent to Notion`, 'success');
-                State.selectedIds.clear();
-                document.querySelectorAll('.task-checkbox').forEach(cb => cb.checked = false);
-                updateActionBar();
-            } else {
-                showToast(response?.message || 'Export failed', 'error');
-            }
-        } catch (err) {
-            Logger.error('Export error:', err);
-            showToast('Export failed. Check console for details.', 'error');
-        } finally {
-            els.exportBtn.disabled    = false;
-            els.exportBtn.textContent = 'Export';
-            setTimeout(() => { els.progressFill.style.width = '0%'; }, 1000);
-        }
-
-    } else if (format === 'text') {
+    if (format === 'text') {
         const text = selectedTasks.map(t => `${t.subject} — ${t.name} (${t.date || 'No date'})`).join('\n');
         await navigator.clipboard.writeText(text);
         showToast('Copied as plain text', 'success');
@@ -585,6 +600,11 @@ els.exportBtn.addEventListener('click', async () => {
 els.fetchInitialBtn.addEventListener('click', doFetch);
 els.fetchFilesInitialBtn.addEventListener('click', doFetchFilesOnly);
 
+// — Notion —
+els.connectNotionBtn.addEventListener('click', doConnectNotion);
+els.disconnectNotionBtn.addEventListener('click', doDisconnectNotion);
+els.sendToNotionBtn.addEventListener('click', doSendToNotion);
+
 // — Search (debounced) —
 let searchDebounceTimer;
 els.taskSearch.addEventListener('input', (e) => {
@@ -593,6 +613,17 @@ els.taskSearch.addEventListener('input', (e) => {
         State.searchQuery = e.target.value;
         if (State.tasks.length > 0) renderTasks();
     }, 150);
+});
+
+// — Custom select keyboard support —
+[els.subjectFilterBtn, els.sortSelectBtn].forEach(btn => {
+    btn.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); btn.click(); }
+        if (e.key === 'Escape') {
+            document.querySelectorAll('.custom-select-dropdown').forEach(d => d.classList.add('hidden'));
+            document.querySelectorAll('.custom-select-btn').forEach(b => b.setAttribute('aria-expanded', 'false'));
+        }
+    });
 });
 
 // — Subject filter dropdown —
@@ -647,7 +678,8 @@ document.addEventListener('keydown', (e) => {
 
 // — Delegated refresh clicks (rendered dynamically inside lists) —
 els.lists['tasks'].addEventListener('click', e => {
-    if (e.target.closest('#refreshTasksBtn')) doFetch();
+    if (e.target.closest('#refreshTasksBtn'))    doFetch();
+    if (e.target.closest('#syncAllToNotionBtn')) doSyncAllToNotion();
 });
 els.lists['due-soon'].addEventListener('click', e => {
     if (e.target.closest('#refreshDueSoonBtn')) doFetch();
@@ -674,13 +706,18 @@ els.selectAllModules.addEventListener('change', (e) => {
     document.querySelectorAll('.module-checkbox').forEach(cb => cb.checked = e.target.checked);
 });
 
-els.cancelModuleBtn.addEventListener('click', () => {
+function closeModal() {
     els.moduleSelectorModal.classList.remove('visible');
+    if (State._modalFocusTrapCleanup) { State._modalFocusTrapCleanup(); State._modalFocusTrapCleanup = null; }
+}
+
+els.cancelModuleBtn.addEventListener('click', () => {
+    closeModal();
     showToast('Fetch cancelled', 'info', 2000);
 });
 
 els.scanModulesBtn.addEventListener('click', async () => {
-    els.moduleSelectorModal.classList.remove('visible');
+    closeModal();
 
     const selectedIndices = Array.from(document.querySelectorAll('.module-checkbox:checked'))
         .map(cb => parseInt(cb.value));
@@ -732,6 +769,122 @@ els.scanModulesBtn.addEventListener('click', async () => {
         resetFileFetchButtons();
     }
 });
+
+// ============================================================
+// Notion — OAuth & Sync
+// ============================================================
+
+function doConnectNotion() {
+    els.connectNotionBtn.disabled = true;
+    els.connectNotionBtn.textContent = 'Connecting…';
+    showToast('Opening Notion authorization…', 'info', 2000);
+
+    const onResult = (request) => {
+        if (request.action !== 'notionConnectResult') return;
+        chrome.runtime.onMessage.removeListener(onResult);
+
+        if (request.success) {
+            State.notionConnected = true;
+            renderNotionSettings(true, request.workspaceName, request.dbUrl || '');
+            updateActionBar();
+            showToast('Connected to Notion!', 'success');
+        } else {
+            showToast(request.error || 'Connection failed. Try again.', 'error');
+        }
+        els.connectNotionBtn.disabled = false;
+        els.connectNotionBtn.textContent = 'Connect with Notion';
+    };
+    chrome.runtime.onMessage.addListener(onResult);
+
+    // Wake the service worker first, then start OAuth once it's ready.
+    chrome.runtime.sendMessage({ action: 'ping' }, () => {
+        void chrome.runtime.lastError;
+        setTimeout(() => chrome.runtime.sendMessage({ action: 'notionConnect' }), 500);
+    });
+}
+
+async function doSyncAllToNotion() {
+    const items = await chrome.storage.local.get(['notionToken', 'notionDatabaseId', 'notionSyncedIds']);
+    if (!items.notionToken || !items.notionDatabaseId) {
+        showToast('Connect to Notion first', 'error');
+        openSettings();
+        return;
+    }
+
+    const activeTasks = State.tasks.filter(t => !State.completedTaskIds.has(t.id));
+    if (!activeTasks.length) { showToast('No tasks to sync', 'info'); return; }
+
+    const syncedIds = new Set(items.notionSyncedIds || []);
+    if (activeTasks.every(t => syncedIds.has(t.id))) {
+        showToast('All tasks already in Notion', 'info');
+        return;
+    }
+
+    const btn = document.getElementById('syncAllToNotionBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
+
+    try {
+        const results = await sendTasks(items.notionToken, items.notionDatabaseId, activeTasks, syncedIds);
+        await chrome.storage.local.set({ notionSyncedIds: [...syncedIds] });
+
+        const skipNote = results.skipped > 0 ? `, ${results.skipped} already synced` : '';
+        if (results.created > 0) showToast(`${results.created} task${results.created !== 1 ? 's' : ''} sent to Notion${skipNote}`, 'success');
+        if (results.failed > 0)  showToast(`${results.failed} failed to send`, 'error');
+
+    } catch (err) {
+        Logger.error('Sync all error:', err);
+        showToast('Sync failed', 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Sync All'; }
+    }
+}
+
+function doDisconnectNotion() {
+    chrome.storage.local.remove(['notionToken', 'notionDatabaseId', 'notionWorkspaceName'], () => {
+        State.notionConnected = false;
+        renderNotionSettings(false);
+        updateActionBar();
+        showToast('Disconnected from Notion', 'info');
+    });
+}
+
+async function doSendToNotion() {
+    const items = await chrome.storage.local.get(['notionToken', 'notionDatabaseId', 'notionSyncedIds']);
+    if (!items.notionToken || !items.notionDatabaseId) {
+        showToast('Connect to Notion first', 'error');
+        openSettings();
+        return;
+    }
+
+    const selectedTasks = [...State.selectedIds]
+        .map(id => State.tasks.find(t => t.id === id))
+        .filter(Boolean);
+    if (!selectedTasks.length) { showToast('No tasks selected', 'error'); return; }
+
+    const syncedIds = new Set(items.notionSyncedIds || []);
+    els.sendToNotionBtn.disabled = true;
+    els.sendToNotionBtn.textContent = 'Sending…';
+
+    try {
+        const results = await sendTasks(items.notionToken, items.notionDatabaseId, selectedTasks, syncedIds);
+        await chrome.storage.local.set({ notionSyncedIds: [...syncedIds] });
+
+        if (results.created > 0) {
+            const skipNote = results.skipped > 0 ? `, ${results.skipped} already synced` : '';
+            showToast(`${results.created} task${results.created !== 1 ? 's' : ''} sent to Notion${skipNote}`, 'success');
+        } else if (results.skipped > 0) {
+            showToast('All selected tasks already in Notion', 'info');
+        }
+        if (results.failed > 0) showToast(`${results.failed} task${results.failed !== 1 ? 's' : ''} failed to send`, 'error');
+
+    } catch (err) {
+        Logger.error('Send to Notion error:', err);
+        showToast('Failed to send to Notion', 'error');
+    } finally {
+        els.sendToNotionBtn.disabled = false;
+        els.sendToNotionBtn.textContent = 'Send to Notion';
+    }
+}
 
 // ============================================================
 // Boot

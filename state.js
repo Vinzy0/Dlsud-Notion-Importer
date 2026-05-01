@@ -4,7 +4,7 @@
 
 /** @type {{ tasks: Array, files: Array, selectedIds: Set, activeTab: string,
  *           dismissedFileWarning: boolean, currentTabUrl: string, darkMode: boolean,
- *           notionSyncEnabled: boolean, completedTaskIds: Set,
+ *           completedTaskIds: Set,
  *           searchQuery: string, subjectFilter: string, sortBy: string,
  *           pendingModuleLinks: Array, pendingSubject: string }} */
 export const State = {
@@ -15,13 +15,14 @@ export const State = {
     dismissedFileWarning: false,
     currentTabUrl: '',
     darkMode: false,
-    notionSyncEnabled: false,
     completedTaskIds: new Set(),
     searchQuery: '',
     subjectFilter: '',
-    sortBy: 'dueDate',
+    sortBy: 'grouped',
     pendingModuleLinks: [],
-    pendingSubject: ''
+    pendingSubject: '',
+    notionConnected: false,
+    collapsedSubjects: new Set(),
 };
 
 /** Curated subject color palette — cycles by subject name hash. */

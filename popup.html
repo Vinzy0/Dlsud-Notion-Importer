@@ -73,8 +73,8 @@
                     </defs>
                 </svg>
             </div>
-            <p class="empty-title" id="empty-title">Welcome to UDScraper</p>
-            <p class="empty-desc" id="status-text">Open your dashboard and fetch your assignments</p>
+            <p class="empty-title" id="empty-title">Fetch your DLSUD assignments</p>
+            <p class="empty-desc" id="status-text">Scrapes tasks and files from the LMS. Open your dashboard, then hit the button below.</p>
             <button id="fetchInitialBtn" class="primary-btn">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M1 1v5h5"/>
@@ -109,23 +109,23 @@
             <input type="text" id="taskSearch" class="task-search" placeholder="Search tasks...">
             <div class="task-controls-row">
                 <div class="custom-select-wrapper">
-                    <div id="subjectFilterBtn" class="custom-select-btn">
+                    <div id="subjectFilterBtn" class="custom-select-btn" role="button" tabindex="0" aria-haspopup="listbox" aria-expanded="false" aria-label="Filter by subject">
                         <span id="subjectFilterLabel">All Subjects</span>
                         <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </div>
-                    <div id="subjectFilterDropdown" class="custom-select-dropdown hidden">
-                        <div class="custom-select-option" data-value="">All Subjects</div>
+                    <div id="subjectFilterDropdown" class="custom-select-dropdown hidden" role="listbox" aria-label="Subject options">
+                        <div class="custom-select-option" data-value="" role="option">All Subjects</div>
                     </div>
                 </div>
                 <div class="custom-select-wrapper">
-                    <div id="sortSelectBtn" class="custom-select-btn">
-                        <span id="sortSelectLabel">Due Date</span>
+                    <div id="sortSelectBtn" class="custom-select-btn" role="button" tabindex="0" aria-haspopup="listbox" aria-expanded="false" aria-label="Sort tasks">
+                        <span id="sortSelectLabel">Grouped</span>
                         <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </div>
-                    <div id="sortSelectDropdown" class="custom-select-dropdown hidden">
-                        <div class="custom-select-option selected" data-value="dueDate">Due Date</div>
-                        <div class="custom-select-option" data-value="subject">Subject</div>
-                        <div class="custom-select-option" data-value="name">Name</div>
+                    <div id="sortSelectDropdown" class="custom-select-dropdown hidden" role="listbox" aria-label="Sort options">
+                        <div class="custom-select-option selected" data-value="grouped" role="option">Grouped</div>
+                        <div class="custom-select-option" data-value="dueDate" role="option">Due Date</div>
+                        <div class="custom-select-option" data-value="name" role="option">Name</div>
                     </div>
                 </div>
             </div>
@@ -139,15 +139,20 @@
 
     <!-- Action Bar (slides up from bottom) -->
     <div id="action-bar" class="action-bar">
-        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
         <div class="action-left">
             <select id="exportSelect" class="export-dropdown">
-                <option value="notion">Send to Notion</option>
                 <option value="text">Copy as Plain Text</option>
                 <option value="markdown">Copy as Markdown</option>
                 <option value="csv">Copy as CSV</option>
             </select>
             <button id="exportBtn" class="primary-btn small">Export</button>
+            <button id="sendToNotionBtn" class="notion-action-btn hidden">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="1" y="1" width="11" height="11" rx="2"/>
+                    <path d="M4 4l3 5 2-3"/>
+                </svg>
+                Send to Notion
+            </button>
         </div>
         <div class="action-right">
             <span id="selected-count" class="selected-text">0 selected</span>
@@ -173,43 +178,35 @@
             </button>
         </div>
         <div class="settings-body">
-            <div class="form-group row">
-                <label for="notionSyncToggle">Enable Notion Sync</label>
-                <label class="switch">
-                    <input type="checkbox" id="notionSyncToggle">
-                    <span class="slider round"></span>
-                </label>
-            </div>
-            <div id="notionCredentialsSection">
-                <button id="notionTutorialToggle" class="tutorial-toggle" aria-expanded="false">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="8" cy="8" r="6"/><path d="M8 7v4"/><circle cx="8" cy="5" r="0.5" fill="currentColor"/>
+            <!-- Notion Integration -->
+            <p class="settings-section-label">Notion</p>
+
+            <div id="notion-disconnected">
+                <p class="notion-hint">Send tasks directly to your Notion workspace.</p>
+                <button id="connectNotionBtn" class="notion-btn">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="1" y="1" width="12" height="12" rx="2.5"/>
+                        <path d="M4.5 4l3 5.5 2-4"/>
                     </svg>
-                    How to connect Notion
-                    <svg class="tutorial-chevron" width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Connect with Notion
                 </button>
-                <div id="notionTutorial" class="tutorial-panel hidden">
-                    <ol class="tutorial-steps">
-                        <li>Go to <strong>notion.so/profile/integrations</strong> → create a new integration → copy the <strong>Internal Integration Secret</strong> (starts with <code>secret_</code> or <code>ntn_</code>)</li>
-                        <li>Create a Notion database with these exact column names: <code>Name</code> (Title), <code>Subject</code> (Text), <code>Due Date</code> (Text), <code>Link</code> (URL)</li>
-                        <li>Open your database → click <strong>···</strong> menu → <strong>Add connections</strong> → select your integration</li>
-                        <li>Copy the database ID from the URL: <code>notion.so/<strong>[32 chars here]</strong>?v=...</code></li>
-                    </ol>
+            </div>
+
+            <div id="notion-connected" class="hidden">
+                <div class="notion-workspace-row">
+                    <span class="notion-status-dot"></span>
+                    <span id="notion-workspace-name" class="notion-workspace-name">Workspace</span>
                 </div>
-                <div class="form-group">
-                    <label for="apiKey">NOTION TOKEN</label>
-                    <input type="password" id="apiKey" placeholder="secret_..." aria-label="Notion API Token">
+                <p class="notion-db-ready">DLSUD Tasks database ready</p>
+                <div class="notion-connected-actions">
+                    <a id="notionDbLink" href="#" target="_blank" rel="noopener noreferrer" class="link-btn">Open in Notion ↗</a>
+                    <button id="disconnectNotionBtn" class="link-btn-danger">Disconnect</button>
                 </div>
-                <div class="form-group">
-                    <label for="dbId">DATABASE ID</label>
-                    <input type="text" id="dbId" placeholder="32 character ID" aria-label="Notion Database ID">
-                </div>
-                <button id="saveKeysBtn" class="primary-btn">Save Credentials</button>
-                <div id="settings-status" class="status-msg"></div>
             </div>
 
             <hr class="divider">
 
+            <!-- General -->
             <div class="form-group row">
                 <label for="autoRetrieve">Auto-Retrieve (Beta)</label>
                 <label class="switch">
@@ -235,12 +232,34 @@
         </div>
     </aside>
 
+    <!-- Confirm Dialog -->
+    <div id="confirmDialog" class="modal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content confirm-modal">
+            <div class="confirm-body">
+                <div class="confirm-icon">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                </div>
+                <h3 class="confirm-title" id="confirmTitle">Clear All Data?</h3>
+                <p class="confirm-desc" id="confirmDesc">This will clear all cached tasks, files, and credentials.</p>
+            </div>
+            <div class="confirm-actions">
+                <button id="confirmCancelBtn" class="secondary-btn">Cancel</button>
+                <button id="confirmOkBtn" class="danger-btn">Clear</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Module Selector Modal -->
-    <div id="moduleSelectorModal" class="modal">
+    <div id="moduleSelectorModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="moduleSelectorTitle">
         <div class="modal-overlay"></div>
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Select Lessons</h3>
+                <h3 id="moduleSelectorTitle">Select Lessons</h3>
                 <label class="select-all-label"><input type="checkbox" id="selectAllModules" checked> Select All</label>
             </div>
             <div id="moduleList" class="module-list"></div>
