@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="hi (2).png" alt="UDScraper Logo" width="128" height="128" />
-
 # UDScraper
 
 **Sync your DLSUD assignments to Notion — in one click.**
