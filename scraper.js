@@ -290,3 +290,8 @@ function scrapeSidebarModules() {
 
     return items;
 }
+
+// Keep this classic script injectable, while exporting the real helpers to Node tests.
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { cleanSubject, scrapeSubjectName };
+}

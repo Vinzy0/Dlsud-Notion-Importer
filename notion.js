@@ -141,3 +141,8 @@ function parseDateToISO(rawDate) {
     if (new Date() - d > 180 * 24 * 60 * 60 * 1000) d.setFullYear(d.getFullYear() + 1);
     return d.toISOString().split('T')[0];
 }
+
+/** Removes the saved Notion connection. */
+export async function disconnectNotion() {
+    await chrome.storage.local.remove(['notionToken', 'notionDatabaseId', 'notionWorkspaceName']);
+}

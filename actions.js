@@ -15,7 +15,7 @@ import {
     parseDate, updateBadge, applyTheme, isOnSubjectPage,
     updateSubjectFilterOptions, renderNotionSettings,
 } from './ui.js';
-import { sendTasks } from './notion.js';
+import { sendTasks, disconnectNotion } from './notion.js';
 
 // ============================================================
 // Script Injection Helpers
@@ -840,7 +840,7 @@ async function doSyncAllToNotion() {
 }
 
 function doDisconnectNotion() {
-    chrome.storage.local.remove(['notionToken', 'notionDatabaseId', 'notionWorkspaceName'], () => {
+    disconnectNotion().then(() => {
         State.notionConnected = false;
         renderNotionSettings(false);
         updateActionBar();
