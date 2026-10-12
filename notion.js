@@ -121,7 +121,7 @@ export async function sendTasks(token, databaseId, tasks, syncedIds) {
                 resp = await fetch('https://api.notion.com/v1/pages', options);
                 if (resp.ok) break;
                 const rawBody = await resp.text();
-                try { body = JSON.parse(rawBody); }
+                try { body = JSON.parse(rawBody) || { message: rawBody }; }
                 catch { body = { message: rawBody }; }
                 if (resp.status !== 429 || attempt === 3 ||
                     body.additional_data?.rate_limit_reason === 'public_api_request_blocked') break;
@@ -157,7 +157,7 @@ export async function saveNotionSyncResult(results, syncedIds) {
     else await chrome.storage.local.set({ notionSyncedIds: [...syncedIds] });
     if (results.errors.length) {
         const message = results.authExpired
-            ? `${results.errors[0].message} Reconnect to Notion in Settings.`
+            ? `${results.errors[results.errors.length - 1].message} Reconnect to Notion in Settings.`
             : results.errors[results.errors.length - 1].message;
         await chrome.storage.local.set({ notionSyncError: message });
     } else {
@@ -183,6 +183,6 @@ function parseDateToISO(rawDate) {
 export async function disconnectNotion() {
     await chrome.storage.local.remove([
         'notionToken', 'notionDatabaseId', 'notionWorkspaceName',
-        'notionSyncedIds', 'notionDatabaseUrl',
+        'notionSyncedIds', 'notionDatabaseUrl', 'notionSyncError',
     ]);
 }

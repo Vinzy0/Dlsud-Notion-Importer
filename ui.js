@@ -148,23 +148,6 @@ export function updateLoadingProgress(message, current, total) {
 // ============================================================
 
 /**
- * Parses a raw LMS date string into a Date object.
- * Returns null for non-date strings or unparseable input.
- * Applies a 6-month heuristic to handle year roll-over.
- * @param {string|null} rawString - e.g. "Mar 28" or "No Due Date"
- * @returns {Date|null}
- */
-
-
-/**
- * Returns a display label and CSS class for a given date string
- * relative to today (OVERDUE, TODAY, TOMORROW, Nd left, raw date, etc.).
- * @param {string|null} dateStr
- * @returns {{ label: string, class: string, urgency: string }}
- */
-
-
-/**
  * Returns a color palette entry for a given subject, deterministically
  * based on the subject string hash.
  * @param {string} subject

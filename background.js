@@ -98,7 +98,7 @@ async function runNotionConnect() {
             notionDatabaseUrl:   db.url,
         });
 
-        await chrome.storage.local.remove('notionConnectError');
+        await chrome.storage.local.remove(['notionConnectError', 'notionSyncError']);
         return { success: true, workspaceName: tokenData.workspace_name || 'Notion', dbUrl: db.url };
     } catch (err) {
         Logger.error('Notion connect error:', err.message, err);

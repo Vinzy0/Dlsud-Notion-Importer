@@ -48,6 +48,19 @@ test('F5: 401 reports the error and stops using the invalid token', async (t) =>
     assert.match(storage.notionSyncError, /Reconnect/);
 });
 
+test('F5: a 401 with a null body still disconnects and keeps the correct error', async (t) => {
+    const { storage } = mockNotionStorage(t);
+    let calls = 0;
+    t.mock.method(globalThis, 'fetch', async () => ++calls === 1
+        ? new Response('{"message":"Invalid subject"}', { status: 400 })
+        : new Response('null', { status: 401 }));
+    const results = await sendTasks('test-token', 'test-db', [task, { ...task, id: 't2' }], new Set());
+    await saveNotionSyncResult(results, new Set());
+    assert.equal(results.authExpired, true);
+    assert.equal('notionToken' in storage, false);
+    assert.match(storage.notionSyncError, /Notion 401.*Reconnect/);
+});
+
 test('F5: 429 honors Retry-After, then succeeds without duplicate IDs', async (t) => {
     const { storage } = mockNotionStorage(t);
     const waits = [];

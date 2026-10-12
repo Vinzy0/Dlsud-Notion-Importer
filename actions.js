@@ -155,7 +155,7 @@ export async function doFetch() {
             chrome.storage.onChanged.removeListener(onScanComplete);
             chrome.runtime.onMessage.removeListener(onScanProgress);
 
-            if (changes.lastScanResult?.newValue?.success === false) {
+            if (changes.lastScanResult?.newValue?.success === false || !changes.lastScrape) {
                 setFetching(false);
                 loadCache();
                 return;
@@ -864,7 +864,7 @@ async function handleNotionSyncResult(results, syncedIds) {
     }
     if (results.errors.length) {
         const message = results.authExpired
-            ? `${results.errors[0].message} Reconnect to Notion in Settings.`
+            ? `${results.errors[results.errors.length - 1].message} Reconnect to Notion in Settings.`
             : results.errors[results.errors.length - 1].message;
         showToast(message, 'error', 6000);
     }
