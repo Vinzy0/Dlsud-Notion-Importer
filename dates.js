@@ -3,12 +3,15 @@ export function parseDate(rawString) {
     if (!rawString || rawString === 'No Due Date' || rawString === 'Check Link') return null;
     const match = rawString.match(/^[A-Z][a-z]{2}\s\d+/);
     if (!match) return null;
-    const currentYear = new Date().getFullYear();
-    const d = new Date(`${match[0]} ${currentYear}`);
-    if (isNaN(d.getTime())) return null;
     const now = new Date();
-    if (now - d > 180 * 24 * 60 * 60 * 1000) d.setFullYear(d.getFullYear() + 1);
-    return d;
+    const year = now.getFullYear();
+    const candidates = [year, year - 1, year + 1]
+        .map(y => new Date(`${match[0]} ${y}`))
+        .filter(d => !isNaN(d.getTime()));
+    if (!candidates.length) return null;
+    return candidates.reduce((closest, d) =>
+        Math.abs(d - now) < Math.abs(closest - now) ? d : closest
+    );
 }
 
 export function getUrgencyInfo(dateStr) {
