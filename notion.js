@@ -92,17 +92,17 @@ export async function setupDatabase(token) {
  * @param {string} databaseId
  * @param {Array}  tasks
  * @param {Set<string>} syncedIds
- * @returns {Promise<{ created: number, skipped: number, failed: number }>}
+ * @returns {Promise<{ created: number, skipped: number, failed: number, errors: Array, authExpired: boolean }>}
  */
 export async function sendTasks(token, databaseId, tasks, syncedIds) {
-    const results = { created: 0, skipped: 0, failed: 0 };
+    const results = { created: 0, skipped: 0, failed: 0, errors: [], authExpired: false };
 
     for (const task of tasks) {
         if (syncedIds.has(task.id)) { results.skipped++; continue; }
 
         try {
             const dueDate = parseDateToISO(task.date);
-            const resp = await fetch('https://api.notion.com/v1/pages', {
+            const options = {
                 method: 'POST',
                 headers: notionHeaders(token),
                 body: JSON.stringify({
@@ -114,15 +114,55 @@ export async function sendTasks(token, databaseId, tasks, syncedIds) {
                         ...(dueDate ? { 'Due Date': { date: { start: dueDate } } } : {}),
                     },
                 }),
-            });
+            };
+            let resp;
+            let body;
+            for (let attempt = 0; attempt <= 3; attempt++) {
+                resp = await fetch('https://api.notion.com/v1/pages', options);
+                if (resp.ok) break;
+                const rawBody = await resp.text();
+                try { body = JSON.parse(rawBody); }
+                catch { body = { message: rawBody }; }
+                if (resp.status !== 429 || attempt === 3 ||
+                    body.additional_data?.rate_limit_reason === 'public_api_request_blocked') break;
+                const header = resp.headers.get('Retry-After');
+                const seconds = header === null ? NaN : Number(header);
+                const delay = Math.max(
+                    Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : 0,
+                    1000 * 2 ** attempt
+                ) + Math.random() * 250;
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
             if (resp.ok) { syncedIds.add(task.id); results.created++; }
-            else results.failed++;
-        } catch {
+            else {
+                const message = `Notion ${resp.status}: ${body.message || body.code || 'Request failed'}`;
+                Logger.error('Notion task error:', resp.status, body);
+                results.errors.push({ status: resp.status, message });
+                results.failed++;
+                if (resp.status === 401) { results.authExpired = true; break; }
+            }
+        } catch (err) {
+            Logger.error('Notion task error:', err.message);
+            results.errors.push({ status: 0, message: err.message });
             results.failed++;
         }
     }
 
     return results;
+}
+
+/** Persist sync results without restoring stale IDs after an authentication failure. */
+export async function saveNotionSyncResult(results, syncedIds) {
+    if (results.authExpired) await disconnectNotion();
+    else await chrome.storage.local.set({ notionSyncedIds: [...syncedIds] });
+    if (results.errors.length) {
+        const message = results.authExpired
+            ? `${results.errors[0].message} Reconnect to Notion in Settings.`
+            : results.errors[results.errors.length - 1].message;
+        await chrome.storage.local.set({ notionSyncError: message });
+    } else {
+        await chrome.storage.local.remove('notionSyncError');
+    }
 }
 
 function notionHeaders(token) {

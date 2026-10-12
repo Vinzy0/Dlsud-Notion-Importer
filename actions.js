@@ -15,7 +15,7 @@ import {
     parseDate, updateBadge, applyTheme, isOnSubjectPage,
     updateSubjectFilterOptions, renderNotionSettings,
 } from './ui.js';
-import { sendTasks, disconnectNotion } from './notion.js';
+import { sendTasks, disconnectNotion, saveNotionSyncResult } from './notion.js';
 
 // ============================================================
 // Script Injection Helpers
@@ -357,7 +357,8 @@ function saveAndRenderFiles() {
 export function loadCache() {
     chrome.storage.local.get(
         ['lastScrape', 'dismissedFileWarning', 'completedTaskIds', 'darkMode',
-         'notionToken', 'notionDatabaseId', 'notionWorkspaceName', 'notionDatabaseUrl'],
+         'notionToken', 'notionDatabaseId', 'notionWorkspaceName', 'notionDatabaseUrl',
+         'notionConnectError', 'notionSyncError'],
         (items) => {
             State.dismissedFileWarning = items.dismissedFileWarning || false;
 
@@ -380,6 +381,7 @@ export function loadCache() {
                 showToast(items.notionConnectError, 'error', 6000);
                 chrome.storage.local.remove('notionConnectError');
             }
+            if (items.notionSyncError) showToast(items.notionSyncError, 'error', 6000);
 
             const cache = items.lastScrape;
             const AUTO_REFRESH_MS = 12 * 60 * 60 * 1000;
@@ -825,17 +827,32 @@ async function doSyncAllToNotion() {
 
     try {
         const results = await sendTasks(items.notionToken, items.notionDatabaseId, activeTasks, syncedIds);
-        await chrome.storage.local.set({ notionSyncedIds: [...syncedIds] });
+        await handleNotionSyncResult(results, syncedIds);
 
         const skipNote = results.skipped > 0 ? `, ${results.skipped} already synced` : '';
         if (results.created > 0) showToast(`${results.created} task${results.created !== 1 ? 's' : ''} sent to Notion${skipNote}`, 'success');
-        if (results.failed > 0)  showToast(`${results.failed} failed to send`, 'error');
 
     } catch (err) {
         Logger.error('Sync all error:', err);
         showToast('Sync failed', 'error');
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Sync All'; }
+    }
+}
+
+async function handleNotionSyncResult(results, syncedIds) {
+    await saveNotionSyncResult(results, syncedIds);
+    if (results.authExpired) {
+        State.notionConnected = false;
+        renderNotionSettings(false);
+        updateActionBar();
+        openSettings();
+    }
+    if (results.errors.length) {
+        const message = results.authExpired
+            ? `${results.errors[0].message} Reconnect to Notion in Settings.`
+            : results.errors[results.errors.length - 1].message;
+        showToast(message, 'error', 6000);
     }
 }
 
@@ -867,7 +884,7 @@ async function doSendToNotion() {
 
     try {
         const results = await sendTasks(items.notionToken, items.notionDatabaseId, selectedTasks, syncedIds);
-        await chrome.storage.local.set({ notionSyncedIds: [...syncedIds] });
+        await handleNotionSyncResult(results, syncedIds);
 
         if (results.created > 0) {
             const skipNote = results.skipped > 0 ? `, ${results.skipped} already synced` : '';
@@ -875,7 +892,6 @@ async function doSendToNotion() {
         } else if (results.skipped > 0) {
             showToast('All selected tasks already in Notion', 'info');
         }
-        if (results.failed > 0) showToast(`${results.failed} task${results.failed !== 1 ? 's' : ''} failed to send`, 'error');
 
     } catch (err) {
         Logger.error('Send to Notion error:', err);
