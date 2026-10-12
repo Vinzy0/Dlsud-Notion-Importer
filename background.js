@@ -98,7 +98,7 @@ async function runNotionConnect() {
             notionDatabaseUrl:   db.url,
         });
 
-        await chrome.storage.local.remove('notionConnectError');
+        await chrome.storage.local.remove(['notionConnectError', 'notionSyncError']);
         return { success: true, workspaceName: tokenData.workspace_name || 'Notion', dbUrl: db.url };
     } catch (err) {
         Logger.error('Notion connect error:', err.message, err);
@@ -156,20 +156,30 @@ async function getOffscreenDocument() {
 
 async function parseSubjectPageOffscreen(html, subject, url) {
     await getOffscreenDocument();
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
         chrome.runtime.sendMessage(
             { target: 'offscreen', action: 'parseSubjectPage', html, subject, url },
-            res => resolve(res?.tasks ?? [])
+            res => {
+                const error = chrome.runtime.lastError;
+                if (error || !Array.isArray(res?.tasks)) {
+                    reject(new Error(error?.message || 'LMS parser did not return tasks'));
+                } else resolve(res.tasks);
+            }
         );
     });
 }
 
 async function findFilesOnPageOffscreen(html, subject, taskName, url) {
     await getOffscreenDocument();
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
         chrome.runtime.sendMessage(
             { target: 'offscreen', action: 'findFilesOnPage', html, subject, taskName, url },
-            res => resolve(res?.files ?? [])
+            res => {
+                const error = chrome.runtime.lastError;
+                if (error || !Array.isArray(res?.files)) {
+                    reject(new Error(error?.message || 'LMS parser did not return files'));
+                } else resolve(res.files);
+            }
         );
     });
 }
@@ -177,6 +187,7 @@ async function findFilesOnPageOffscreen(html, subject, taskName, url) {
 async function runDeepScan(subjectLinks) {
     const allTasks = [];
     const allFiles = [];
+    const errors = [];
 
     for (let i = 0; i < subjectLinks.length; i++) {
         const link = subjectLinks[i];
@@ -189,6 +200,7 @@ async function runDeepScan(subjectLinks) {
 
         try {
             const response = await fetch(link.url);
+            if (!response.ok) throw new Error(`LMS returned HTTP ${response.status}`);
             const text = await response.text();
 
             const tasks = await parseSubjectPageOffscreen(text, cleanSubject(link.subject), link.url);
@@ -199,18 +211,30 @@ async function runDeepScan(subjectLinks) {
                     .filter(task => task.link && task.link !== link.url)
                     .map(task =>
                         fetch(task.link)
-                            .then(r => r.text())
+                            .then(r => {
+                                if (!r.ok) throw new Error(`LMS returned HTTP ${r.status}`);
+                                return r.text();
+                            })
                             .then(html => findFilesOnPageOffscreen(html, task.subject, task.name, task.link))
                             .catch(e => {
                                 Logger.error(`Error scanning task "${task.name}":`, e);
-                                return [];
+                                throw e;
                             })
                     )
             );
             taskPageResults.forEach(files => allFiles.push(...files));
         } catch (err) {
             Logger.error(`Error fetching subject "${link.subject}":`, err);
+            errors.push(`${link.subject}: ${err.message}`);
         }
+    }
+
+    if (errors.length) {
+        await chrome.storage.local.set({
+            lastScanError: errors.join('; '),
+            lastScanResult: { success: false, finishedAt: Date.now() },
+        });
+        return;
     }
 
     const uniqueTasks = [...new Map(allTasks.map(t => [t.id, t])).values()];
@@ -220,7 +244,10 @@ async function runDeepScan(subjectLinks) {
         files: allFiles
     };
 
-    await chrome.storage.local.set({ lastScrape: cache });
+    await chrome.storage.local.set({
+        lastScrape: cache, lastScanError: null,
+        lastScanResult: { success: true, finishedAt: Date.now() },
+    });
 }
 
 function updateBadge(count, hasOverdue) {
@@ -232,5 +259,10 @@ function updateBadge(count, hasOverdue) {
     } else {
         chrome.action.setBadgeText({ text: '' });
     }
+}
+
+// Preserve the classic MV3 worker while letting tests call its real scan function.
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { runDeepScan };
 }
 

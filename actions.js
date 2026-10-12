@@ -15,7 +15,7 @@ import {
     parseDate, updateBadge, applyTheme, isOnSubjectPage,
     updateSubjectFilterOptions, renderNotionSettings,
 } from './ui.js';
-import { sendTasks } from './notion.js';
+import { sendTasks, disconnectNotion, saveNotionSyncResult } from './notion.js';
 
 // ============================================================
 // Script Injection Helpers
@@ -79,7 +79,7 @@ function setFetching(val) {
  * The popup can be closed mid-scan — results are saved to storage
  * and picked up by chrome.storage.onChanged when the scan completes.
  */
-async function doFetch() {
+export async function doFetch() {
     if (isFetching) return;
     setFetching(true);
 
@@ -151,9 +151,15 @@ async function doFetch() {
 
         // Listen for the background scan to write its results to storage.
         const onScanComplete = (changes, area) => {
-            if (area !== 'local' || !changes.lastScrape) return;
+            if (area !== 'local' || (!changes.lastScrape && !changes.lastScanResult)) return;
             chrome.storage.onChanged.removeListener(onScanComplete);
             chrome.runtime.onMessage.removeListener(onScanProgress);
+
+            if (changes.lastScanResult?.newValue?.success === false || !changes.lastScrape) {
+                setFetching(false);
+                loadCache();
+                return;
+            }
 
             const cache = changes.lastScrape.newValue;
             if (!cache || !cache.tasks || cache.tasks.length === 0) {
@@ -356,8 +362,9 @@ function saveAndRenderFiles() {
  */
 export function loadCache() {
     chrome.storage.local.get(
-        ['lastScrape', 'dismissedFileWarning', 'completedTaskIds', 'darkMode',
-         'notionToken', 'notionDatabaseId', 'notionWorkspaceName', 'notionDatabaseUrl'],
+        ['lastScrape', 'lastScanError', 'dismissedFileWarning', 'completedTaskIds', 'darkMode',
+         'notionToken', 'notionDatabaseId', 'notionWorkspaceName', 'notionDatabaseUrl',
+         'notionConnectError', 'notionSyncError'],
         (items) => {
             State.dismissedFileWarning = items.dismissedFileWarning || false;
 
@@ -380,6 +387,7 @@ export function loadCache() {
                 showToast(items.notionConnectError, 'error', 6000);
                 chrome.storage.local.remove('notionConnectError');
             }
+            if (items.notionSyncError) showToast(items.notionSyncError, 'error', 6000);
 
             const cache = items.lastScrape;
             const AUTO_REFRESH_MS = 12 * 60 * 60 * 1000;
@@ -405,7 +413,7 @@ export function loadCache() {
 
                 switchTab(dueSoonItems.length > 0 ? 'due-soon' : 'tasks');
 
-                if (cache.timestamp && Date.now() - cache.timestamp > AUTO_REFRESH_MS) {
+                if (!items.lastScanError && cache.timestamp && Date.now() - cache.timestamp > AUTO_REFRESH_MS) {
                     doFetch();
                 }
 
@@ -423,6 +431,14 @@ export function loadCache() {
                 els.emptyTitle.textContent = 'Fetch your DLSUD assignments';
                 els.statusText.textContent = 'Scrapes tasks and files from the LMS. Open your dashboard, then hit the button below.';
                 showFileWarningIfNeeded();
+            }
+            if (items.lastScanError) {
+                showToast(`Couldn't reach the LMS. ${items.lastScanError}. Previous results kept.`, 'error', 6000);
+                if (!cache?.tasks?.length && !cache?.files?.length) {
+                    els.emptyTitle.textContent = "Couldn't reach the LMS";
+                    els.statusText.textContent = 'Sign in to the LMS and try fetching again.';
+                    els.fetchInitialBtn.classList.remove('hidden');
+                }
             }
         }
     );
@@ -825,11 +841,10 @@ async function doSyncAllToNotion() {
 
     try {
         const results = await sendTasks(items.notionToken, items.notionDatabaseId, activeTasks, syncedIds);
-        await chrome.storage.local.set({ notionSyncedIds: [...syncedIds] });
+        await handleNotionSyncResult(results, syncedIds);
 
         const skipNote = results.skipped > 0 ? `, ${results.skipped} already synced` : '';
         if (results.created > 0) showToast(`${results.created} task${results.created !== 1 ? 's' : ''} sent to Notion${skipNote}`, 'success');
-        if (results.failed > 0)  showToast(`${results.failed} failed to send`, 'error');
 
     } catch (err) {
         Logger.error('Sync all error:', err);
@@ -839,8 +854,24 @@ async function doSyncAllToNotion() {
     }
 }
 
+async function handleNotionSyncResult(results, syncedIds) {
+    await saveNotionSyncResult(results, syncedIds);
+    if (results.authExpired) {
+        State.notionConnected = false;
+        renderNotionSettings(false);
+        updateActionBar();
+        openSettings();
+    }
+    if (results.errors.length) {
+        const message = results.authExpired
+            ? `${results.errors[results.errors.length - 1].message} Reconnect to Notion in Settings.`
+            : results.errors[results.errors.length - 1].message;
+        showToast(message, 'error', 6000);
+    }
+}
+
 function doDisconnectNotion() {
-    chrome.storage.local.remove(['notionToken', 'notionDatabaseId', 'notionWorkspaceName'], () => {
+    disconnectNotion().then(() => {
         State.notionConnected = false;
         renderNotionSettings(false);
         updateActionBar();
@@ -867,7 +898,7 @@ async function doSendToNotion() {
 
     try {
         const results = await sendTasks(items.notionToken, items.notionDatabaseId, selectedTasks, syncedIds);
-        await chrome.storage.local.set({ notionSyncedIds: [...syncedIds] });
+        await handleNotionSyncResult(results, syncedIds);
 
         if (results.created > 0) {
             const skipNote = results.skipped > 0 ? `, ${results.skipped} already synced` : '';
@@ -875,7 +906,6 @@ async function doSendToNotion() {
         } else if (results.skipped > 0) {
             showToast('All selected tasks already in Notion', 'info');
         }
-        if (results.failed > 0) showToast(`${results.failed} task${results.failed !== 1 ? 's' : ''} failed to send`, 'error');
 
     } catch (err) {
         Logger.error('Send to Notion error:', err);

@@ -1,6 +1,7 @@
 // ==========================================
 // notion.js — Notion OAuth & API Integration
 // ==========================================
+import { parseDate } from './dates.js';
 // ⚠️  After setup, fill in these two constants:
 const NOTION_CLIENT_ID = '350d872b-594c-81ca-8ed8-0037012c42d1';
 const WORKER_URL       = 'https://udscraper.sapture.workers.dev';
@@ -91,37 +92,77 @@ export async function setupDatabase(token) {
  * @param {string} databaseId
  * @param {Array}  tasks
  * @param {Set<string>} syncedIds
- * @returns {Promise<{ created: number, skipped: number, failed: number }>}
+ * @returns {Promise<{ created: number, skipped: number, failed: number, errors: Array, authExpired: boolean }>}
  */
 export async function sendTasks(token, databaseId, tasks, syncedIds) {
-    const results = { created: 0, skipped: 0, failed: 0 };
+    const results = { created: 0, skipped: 0, failed: 0, errors: [], authExpired: false };
 
     for (const task of tasks) {
         if (syncedIds.has(task.id)) { results.skipped++; continue; }
 
         try {
             const dueDate = parseDateToISO(task.date);
-            const resp = await fetch('https://api.notion.com/v1/pages', {
+            const options = {
                 method: 'POST',
                 headers: notionHeaders(token),
                 body: JSON.stringify({
                     parent: { database_id: databaseId },
                     properties: {
                         'Name':    { title: [{ text: { content: task.name } }] },
-                        'Subject': { select: { name: task.subject } },
+                        'Subject': { select: { name: task.subject.replace(/,/g, ';') } },
                         'Link':    { url: task.link },
                         ...(dueDate ? { 'Due Date': { date: { start: dueDate } } } : {}),
                     },
                 }),
-            });
+            };
+            let resp;
+            let body;
+            for (let attempt = 0; attempt <= 3; attempt++) {
+                resp = await fetch('https://api.notion.com/v1/pages', options);
+                if (resp.ok) break;
+                const rawBody = await resp.text();
+                try { body = JSON.parse(rawBody) || { message: rawBody }; }
+                catch { body = { message: rawBody }; }
+                if (resp.status !== 429 || attempt === 3 ||
+                    body.additional_data?.rate_limit_reason === 'public_api_request_blocked') break;
+                const header = resp.headers.get('Retry-After');
+                const seconds = header === null ? NaN : Number(header);
+                const delay = Math.max(
+                    Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : 0,
+                    1000 * 2 ** attempt
+                ) + Math.random() * 250;
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
             if (resp.ok) { syncedIds.add(task.id); results.created++; }
-            else results.failed++;
-        } catch {
+            else {
+                const message = `Notion ${resp.status}: ${body.message || body.code || 'Request failed'}`;
+                Logger.error('Notion task error:', resp.status, body);
+                results.errors.push({ status: resp.status, message });
+                results.failed++;
+                if (resp.status === 401) { results.authExpired = true; break; }
+            }
+        } catch (err) {
+            Logger.error('Notion task error:', err.message);
+            results.errors.push({ status: 0, message: err.message });
             results.failed++;
         }
     }
 
     return results;
+}
+
+/** Persist sync results without restoring stale IDs after an authentication failure. */
+export async function saveNotionSyncResult(results, syncedIds) {
+    if (results.authExpired) await disconnectNotion();
+    else await chrome.storage.local.set({ notionSyncedIds: [...syncedIds] });
+    if (results.errors.length) {
+        const message = results.authExpired
+            ? `${results.errors[results.errors.length - 1].message} Reconnect to Notion in Settings.`
+            : results.errors[results.errors.length - 1].message;
+        await chrome.storage.local.set({ notionSyncError: message });
+    } else {
+        await chrome.storage.local.remove('notionSyncError');
+    }
 }
 
 function notionHeaders(token) {
@@ -133,11 +174,15 @@ function notionHeaders(token) {
 }
 
 function parseDateToISO(rawDate) {
-    if (!rawDate || rawDate === 'No Due Date' || rawDate === 'Check Link') return null;
-    const match = rawDate.match(/^[A-Z][a-z]{2}\s\d+/);
-    if (!match) return null;
-    const d = new Date(`${match[0]} ${new Date().getFullYear()}`);
-    if (isNaN(d.getTime())) return null;
-    if (new Date() - d > 180 * 24 * 60 * 60 * 1000) d.setFullYear(d.getFullYear() + 1);
-    return d.toISOString().split('T')[0];
+    const d = parseDate(rawDate);
+    if (!d) return null;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Removes the saved Notion connection. */
+export async function disconnectNotion() {
+    await chrome.storage.local.remove([
+        'notionToken', 'notionDatabaseId', 'notionWorkspaceName',
+        'notionSyncedIds', 'notionDatabaseUrl', 'notionSyncError',
+    ]);
 }
