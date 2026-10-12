@@ -2,10 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { sendTasks, disconnectNotion, saveNotionSyncResult } from '../notion.js';
 import { parseDate } from '../dates.js';
+import { createRequire } from 'node:module';
+const { scrapeSubjectName } = createRequire(import.meta.url)('../scraper.js');
 
 process.env.TZ = 'Asia/Manila';
 globalThis.chrome = undefined;
 globalThis.Logger = undefined;
+globalThis.document = undefined;
 const RealDate = Date;
 function freezeDate(iso) {
     globalThis.Date = class extends RealDate {
@@ -86,6 +89,13 @@ test('F5: 429 retries stop after three retries and surface the final body', asyn
     assert.match(storage.notionSyncError, /Still rate limited/);
 });
 const task = { id: 't1', name: 'Assignment', subject: 'CS101', date: 'Oct 15', link: 'https://dlsud.edu20.org/task/1' };
+
+test('F7: subject scraping retains CS-101 while removing a separated page suffix', (t) => {
+    t.mock.property(globalThis, 'document', {
+        querySelector: () => ({ textContent: 'CS-101 Programming - Module 1' }),
+    });
+    assert.equal(scrapeSubjectName(), 'CS-101 Programming');
+});
 
 test('F6: commas are sanitized only in the outbound Notion select name', async (t) => {
     const source = { ...task, subject: 'Science, Technology and Society' };

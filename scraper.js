@@ -38,7 +38,7 @@ function scrapeSubjectName() {
     const headerObj = document.querySelector('header');
     if (headerObj && headerObj.textContent) {
         const match = headerObj.textContent.match(/([A-Z0-9_\-]+\s+.*)/i);
-        if (match) subject = match[0].split('-')[0].trim();
+        if (match) subject = match[0].split(/\s+-\s+/)[0].trim();
         else subject = headerObj.textContent.substring(0, 30).trim();
     }
     return subject;
