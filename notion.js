@@ -109,7 +109,7 @@ export async function sendTasks(token, databaseId, tasks, syncedIds) {
                     parent: { database_id: databaseId },
                     properties: {
                         'Name':    { title: [{ text: { content: task.name } }] },
-                        'Subject': { select: { name: task.subject } },
+                        'Subject': { select: { name: task.subject.replace(/,/g, ';') } },
                         'Link':    { url: task.link },
                         ...(dueDate ? { 'Due Date': { date: { start: dueDate } } } : {}),
                     },

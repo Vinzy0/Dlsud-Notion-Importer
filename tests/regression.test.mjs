@@ -87,6 +87,18 @@ test('F5: 429 retries stop after three retries and surface the final body', asyn
 });
 const task = { id: 't1', name: 'Assignment', subject: 'CS101', date: 'Oct 15', link: 'https://dlsud.edu20.org/task/1' };
 
+test('F6: commas are sanitized only in the outbound Notion select name', async (t) => {
+    const source = { ...task, subject: 'Science, Technology and Society' };
+    let sent;
+    t.mock.method(globalThis, 'fetch', async (_url, options) => {
+        sent = JSON.parse(options.body);
+        return new Response('{}', { status: 200 });
+    });
+    await sendTasks('test-token', 'test-db', [source], new Set());
+    assert.equal(sent.properties.Subject.select.name, 'Science; Technology and Society');
+    assert.equal(source.subject, 'Science, Technology and Society');
+});
+
 test('F4: disconnect clears the old sync IDs and database URL', async (t) => {
     const storage = {
         notionToken: 'test-token', notionDatabaseId: 'test-db', notionWorkspaceName: 'test-workspace',
