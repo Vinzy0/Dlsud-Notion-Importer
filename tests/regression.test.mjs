@@ -4,6 +4,7 @@ import { sendTasks, disconnectNotion } from '../notion.js';
 import { parseDate } from '../dates.js';
 
 process.env.TZ = 'Asia/Manila';
+globalThis.chrome = undefined;
 const RealDate = Date;
 function freezeDate(iso) {
     globalThis.Date = class extends RealDate {
@@ -12,6 +13,21 @@ function freezeDate(iso) {
     };
 }
 const task = { id: 't1', name: 'Assignment', subject: 'CS101', date: 'Oct 15', link: 'https://dlsud.edu20.org/task/1' };
+
+test('F4: disconnect clears the old sync IDs and database URL', async (t) => {
+    const storage = {
+        notionToken: 'test-token', notionDatabaseId: 'test-db', notionWorkspaceName: 'test-workspace',
+        notionSyncedIds: ['t1'], notionDatabaseUrl: 'https://notion.so/test-db', lastScrape: { tasks: [task] },
+    };
+    t.mock.property(globalThis, 'chrome', { storage: { local: {
+        remove: async keys => { for (const key of keys) delete storage[key]; },
+    } } });
+    await disconnectNotion();
+    for (const key of ['notionToken', 'notionDatabaseId', 'notionWorkspaceName', 'notionSyncedIds', 'notionDatabaseUrl']) {
+        assert.equal(key in storage, false, `${key} should be gone`);
+    }
+    assert.deepEqual(storage.lastScrape.tasks, [task]);
+});
 
 test('F1: Notion receives the local calendar day in Asia/Manila', async (t) => {
     freezeDate('2026-10-12T12:00:00+08:00');

@@ -141,5 +141,8 @@ function parseDateToISO(rawDate) {
 
 /** Removes the saved Notion connection. */
 export async function disconnectNotion() {
-    await chrome.storage.local.remove(['notionToken', 'notionDatabaseId', 'notionWorkspaceName']);
+    await chrome.storage.local.remove([
+        'notionToken', 'notionDatabaseId', 'notionWorkspaceName',
+        'notionSyncedIds', 'notionDatabaseUrl',
+    ]);
 }
