@@ -1,6 +1,7 @@
 // ==========================================
 // notion.js — Notion OAuth & API Integration
 // ==========================================
+import { parseDate } from './dates.js';
 // ⚠️  After setup, fill in these two constants:
 const NOTION_CLIENT_ID = '350d872b-594c-81ca-8ed8-0037012c42d1';
 const WORKER_URL       = 'https://udscraper.sapture.workers.dev';
@@ -133,13 +134,9 @@ function notionHeaders(token) {
 }
 
 function parseDateToISO(rawDate) {
-    if (!rawDate || rawDate === 'No Due Date' || rawDate === 'Check Link') return null;
-    const match = rawDate.match(/^[A-Z][a-z]{2}\s\d+/);
-    if (!match) return null;
-    const d = new Date(`${match[0]} ${new Date().getFullYear()}`);
-    if (isNaN(d.getTime())) return null;
-    if (new Date() - d > 180 * 24 * 60 * 60 * 1000) d.setFullYear(d.getFullYear() + 1);
-    return d.toISOString().split('T')[0];
+    const d = parseDate(rawDate);
+    if (!d) return null;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 /** Removes the saved Notion connection. */
