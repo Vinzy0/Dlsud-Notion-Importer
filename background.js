@@ -234,3 +234,8 @@ function updateBadge(count, hasOverdue) {
     }
 }
 
+// Preserve the classic MV3 worker while letting tests call its real scan function.
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { runDeepScan };
+}
+
