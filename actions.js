@@ -79,7 +79,7 @@ function setFetching(val) {
  * The popup can be closed mid-scan — results are saved to storage
  * and picked up by chrome.storage.onChanged when the scan completes.
  */
-async function doFetch() {
+export async function doFetch() {
     if (isFetching) return;
     setFetching(true);
 
@@ -151,9 +151,15 @@ async function doFetch() {
 
         // Listen for the background scan to write its results to storage.
         const onScanComplete = (changes, area) => {
-            if (area !== 'local' || !changes.lastScrape) return;
+            if (area !== 'local' || (!changes.lastScrape && !changes.lastScanResult)) return;
             chrome.storage.onChanged.removeListener(onScanComplete);
             chrome.runtime.onMessage.removeListener(onScanProgress);
+
+            if (changes.lastScanResult?.newValue?.success === false) {
+                setFetching(false);
+                loadCache();
+                return;
+            }
 
             const cache = changes.lastScrape.newValue;
             if (!cache || !cache.tasks || cache.tasks.length === 0) {
@@ -356,7 +362,7 @@ function saveAndRenderFiles() {
  */
 export function loadCache() {
     chrome.storage.local.get(
-        ['lastScrape', 'dismissedFileWarning', 'completedTaskIds', 'darkMode',
+        ['lastScrape', 'lastScanError', 'dismissedFileWarning', 'completedTaskIds', 'darkMode',
          'notionToken', 'notionDatabaseId', 'notionWorkspaceName', 'notionDatabaseUrl',
          'notionConnectError', 'notionSyncError'],
         (items) => {
@@ -407,7 +413,7 @@ export function loadCache() {
 
                 switchTab(dueSoonItems.length > 0 ? 'due-soon' : 'tasks');
 
-                if (cache.timestamp && Date.now() - cache.timestamp > AUTO_REFRESH_MS) {
+                if (!items.lastScanError && cache.timestamp && Date.now() - cache.timestamp > AUTO_REFRESH_MS) {
                     doFetch();
                 }
 
@@ -425,6 +431,14 @@ export function loadCache() {
                 els.emptyTitle.textContent = 'Fetch your DLSUD assignments';
                 els.statusText.textContent = 'Scrapes tasks and files from the LMS. Open your dashboard, then hit the button below.';
                 showFileWarningIfNeeded();
+            }
+            if (items.lastScanError) {
+                showToast(`Couldn't reach the LMS. ${items.lastScanError}. Previous results kept.`, 'error', 6000);
+                if (!cache?.tasks?.length && !cache?.files?.length) {
+                    els.emptyTitle.textContent = "Couldn't reach the LMS";
+                    els.statusText.textContent = 'Sign in to the LMS and try fetching again.';
+                    els.fetchInitialBtn.classList.remove('hidden');
+                }
             }
         }
     );
