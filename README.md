@@ -4,9 +4,7 @@
 
 **Sync your DLSUD assignments to Notion — in one click.**
 
-[![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-Available-4285F4?style=flat-square&logo=google-chrome&logoColor=white)](https://chrome.google.com/webstore)
 [![Manifest V3](https://img.shields.io/badge/Manifest-V3-green?style=flat-square)](https://developer.chrome.com/docs/extensions/mv3/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
 
 </div>
 
@@ -18,6 +16,8 @@ UDScraper is a Chrome extension for **DLSUD students** that pulls your assignmen
 
 No tokens to configure. No spreadsheets to maintain. Just connect your Notion and go.
 
+Current usage: **2 users**, as reported by the project owner.
+
 ---
 
 ## Features
@@ -27,7 +27,7 @@ No tokens to configure. No spreadsheets to maintain. Just connect your Notion an
 - 📚 **Grouped by subject** — tasks are organized under collapsible subject headers by default
 - 📅 **Sort options** — switch between Grouped, Due Date, or Name views
 - ✅ **Send selected or sync all** — push just the tasks you want, or sync everything at once
-- 🔁 **Duplicate detection** — already-synced tasks are never sent twice
+- 🔁 **Duplicate detection** — skips task IDs recorded as synced in local extension storage
 - 📥 **Download tasks** — export your scraped assignments as a local file
 - 🌙 **Dark mode** — easy on the eyes during late-night cramming
 
@@ -36,7 +36,10 @@ No tokens to configure. No spreadsheets to maintain. Just connect your Notion an
 ## How it works
 
 ```
-DLSUD LMS  ──scrape──▶  Extension  ──OAuth──▶  Cloudflare Worker  ──token──▶  Notion API
+DLSUD LMS -> Extension (assignment reads)
+Extension -> Cloudflare Worker -> Notion (OAuth code exchange)
+Extension <- Cloudflare Worker <- Notion (token response)
+Extension -> Notion API (database setup and task sync)
 ```
 
 1. Open the extension on your DLSUD dashboard
@@ -44,17 +47,17 @@ DLSUD LMS  ──scrape──▶  Extension  ──OAuth──▶  Cloudflare Wo
 3. Hit **Sync All** (or select specific tasks and hit **Send to Notion**)
 4. Tasks land in your Notion database, grouped and dated
 
-Your Notion token is exchanged through a Cloudflare Worker — your credentials never touch a third-party server or get stored anywhere except your own device.
+The extension sends your Notion OAuth authorization code to `https://udscraper.sapture.workers.dev`. This Cloudflare Worker exchanges the code with Notion and returns the token to the extension, which saves it in Chrome's local extension storage. The code and returned token pass through the Worker.
+
+The checked-in [Worker code](worker.js) has no explicit code/token logging or persistent storage calls. **UNVERIFIED:** the deployed Worker's code and Cloudflare logging settings have not been audited; this repository does not establish a blanket no-logging guarantee.
 
 ---
 
 ## Getting started
 
-### Install from the Chrome Web Store
+**UNVERIFIED:** a specific Chrome Web Store listing URL is not documented here. The previous link led to the store homepage. Use the manual installation steps below until the listing is verified.
 
-> [**Add to Chrome →**](https://chrome.google.com/webstore)
-
-### Or load it manually (dev mode)
+### Load it manually (dev mode)
 
 1. Clone this repo
    ```bash
@@ -99,12 +102,13 @@ Your Notion token is exchanged through a Cloudflare Worker — your credentials 
 
 ## Privacy
 
-All data stays on your device. The only outbound requests are:
+The extension stores task data, settings and its Notion token in Chrome's local extension storage. Its data flows include:
 
-- **Notion API** (`api.notion.com`) — to create your task pages
-- **Cloudflare Worker** — to securely exchange your OAuth code for a token (no logging, no storage)
+- **DLSUD LMS** (`dlsud.edu20.org`) — to read assignments and files
+- **Notion API** (`api.notion.com`) — for authorization, database setup and task synchronization
+- **Cloudflare Worker** (`udscraper.sapture.workers.dev`) — to exchange the OAuth code with Notion and return the token
 
-No data is ever sold or shared. See the full [privacy policy](privacy-policy.md).
+Task data is sent to Notion when you request a sync. The OAuth code and returned token pass through the Worker during connection. See the [privacy policy](privacy-policy.md) for the source-verified scope and deployment limitations.
 
 ---
 
